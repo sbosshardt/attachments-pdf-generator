@@ -1,0 +1,46 @@
+# Write a Python script that performs the following steps:
+#
+# 1. Use `openpyxl` to open the Excel workbook named "Timeline of Communications as of 2024-03-22.xlsx".
+#    - The workbook is within the attachments-EN folder (and so is all the attachment PDF files listed in the Excel sheet).
+#    - Read the sheet named "Attachments Prep".
+#    - Ignore any rows that are headers or have "Exclude" set to a true-like value.
+#    - For each row, gather these fields:
+#         - Attachment Number
+#         - Title
+#         - Page count
+#         - Additional Remarks about File
+#         - Body (Description)
+#         - Filename Reference
+#         - Date (time Pacific)
+#         - Any other columns you find interesting
+#
+# 2. Generate a single HTML document string containing:
+#    - A Table of Contents at the top (this can be an <h1> or <h2> for the heading).
+#      For each attachment, create a line like:
+#         "Attachment <N>: <Title>"
+#      and make "Attachment <N>" a clickable link to its cover page below.
+#      - You can do this with an anchor link like:
+#            <a href="#cover-<N>">Attachment <N></a>
+#    - A page break after the TOC (so the cover pages begin on a new page).
+#    - For each attachment, a "cover page" section with:
+#         - A distinct anchor/ID: e.g., <div id="cover-<N>" class="cover-page">
+#         - "Attachment <N>" as a heading.
+#         - The Title, Date, and any Additional Remarks about File in separate paragraphs.
+#         - The Body (Description) in another paragraph.
+#      - Insert a CSS rule to ensure each cover page starts on its own page:
+#         .cover-page { page-break-before: always; }
+#
+# 3. Apply minimal CSS styling so it's readable. For example, set a font family, ensure headings stand out, etc.
+#
+# 4. Use the `weasyprint` Python library to convert this HTML string into a PDF file named "weasyoutput.pdf".
+#
+# 5. Provide the final Python script in one code block, with clear function or script-level structure.
+#
+# Guidelines:
+# - Make sure you handle typical edge cases, like missing remarks or descriptions (just show nothing if they're absent).
+# - Keep the code straightforward and well-commented so we can easily adapt it later.
+# - You can assume the workbook is in the same directory as the script.
+# - We'll handle the PDF merging separately with PyMuPDF, so just output the PDF containing the TOC + cover pages.
+# - For each attachment row, we don't actually need to embed the attachment PDF content. Just show the info in the cover page.
+#
+# That’s it—please produce a complete script in Python!
