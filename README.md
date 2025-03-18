@@ -17,17 +17,20 @@ Optional steps like OCRmyPDF or link notations can be annexed via free software.
 
 This repo has the following folders/files:
 
-- app/lib folder *input-files* with your incoming excel data, original attachment PDFs, etc.
-- app/lib folder *output-files* for the final products (merged PDFs, title page, table of contents, etc)
-- prompts /other management files like Python scripts or master source configs.
+- `input-files/` - Directory for your incoming Excel data and original attachment PDFs
+- `output-files/` - Directory for the final products (merged PDFs, table of contents, etc.)
+- `prompts/` - Prompt files and other management files
+- `generate_toc_coverpage.py` - Script to generate table of contents and cover pages
+- `merge_pdfs.py` - Script to merge the TOC/cover pages with attachment PDFs
+- `generate_and_merge.sh` - Shell script to run both Python scripts in sequence
 
 ## Requirements & Dependencies
 
 We use Python 3. Minimal tested with Linux Mint 22. We also rely on these libraries:
 
-- [weasyprint](https://weasyprint.org/)
-- [openpyxl](https://openpyxl.readthedocs.io/en/stable/)
-- [pymupdf](https://pymupdf.readthedocs.io/en/latest/)
+- [weasyprint](https://weasyprint.org/) - For HTML to PDF conversion
+- [openpyxl](https://openpyxl.readthedocs.io/en/stable/) - For reading Excel files
+- [pymupdf](https://pymupdf.readthedocs.io/en/latest/) - For PDF manipulation and merging
 
 
 Depending on your system, you may also need to install native libraries like cairo, pango, libffi, etc., which are required by WeasyPrint. On Ubuntu-based systems, you can typically run the following to install the relevant system dependencies:
@@ -49,10 +52,48 @@ This creates an isolated Python environment in the current directory in the fold
 
 ## Usage
 
-1. Gather your attachments in the input-files folder.
-2. Run the script that generates the title page, table of contents, cover pages, etc.
-3. View the produced PDF file (weasyoutput.pdf) in output-files or as you prefer.
-4. (Optional) run an OCR or other modification script on the produced pdf.
+1. Prepare your Excel file:
+   - Create a file named `input-pdfs.xlsx` in the `input-files` directory
+   - Include sheet named "Attachments Prep" with the following columns:
+     - Attachment Number
+     - Title
+     - Page count (optional)
+     - Additional Remarks about File (optional)
+     - Body (Description) (optional)
+     - Filename Reference (required, points to the PDF file)
+     - Date (time Pacific) (optional)
+     - Language (optional, specifies language subfolder)
+     - Exclude (optional, set to true to exclude an attachment)
+
+2. Place your attachment PDFs:
+   - Put your PDF files in the `input-files` directory or language subdirectories (e.g., `input-files/en/`)
+   - Make sure the filenames match those in the "Filename Reference" column
+
+3. Run the script:
+   ```bash
+   ./generate_and_merge.sh
+   ```
+
+4. View the output files in the `output-files` directory:
+   - `weasyoutput.pdf` - Table of Contents and Cover Pages only
+   - `merged-attachments.pdf` - Complete document with attachments
+
+## How It Works
+
+1. `generate_toc_coverpage.py`:
+   - Reads attachment data from the Excel file
+   - Generates HTML with table of contents and cover pages
+   - Converts HTML to PDF using WeasyPrint
+
+2. `merge_pdfs.py`:
+   - Reads attachment data from the Excel file
+   - Opens the TOC/cover pages PDF
+   - Merges it with all attachment PDFs
+   - Adds PDF bookmarks/outline
+   - Creates final merged PDF
+
+3. `generate_and_merge.sh`:
+   - Runs both scripts in sequence with error handling
 
 ## Author
 Created by Samuel Bosshardt
