@@ -29,7 +29,8 @@ We use Python 3. Minimal tested with Linux Mint 22. We also rely on these librar
 - [openpyxl](https://openpyxl.readthedocs.io/en/stable/)
 - [pymupdf](https://pymupdf.readthedocs.io/en/latest/)
 
-To run WeasyPrint on Linux, you may need the relevant system dependencies:
+
+Depending on your system, you may also need to install native libraries like cairo, pango, libffi, etc., which are required by WeasyPrint. On Ubuntu-based systems, you can typically run the following to install the relevant system dependencies:
 ```bash
 sudo apt-get install python3-dev python3-pip python3-setuptools python3-wheel python3-cffi libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
 ```
@@ -42,7 +43,6 @@ cd attachments-pdf-generator
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-pip install weasyprint openpyxl pymupdf
 ```
 
 This creates an isolated Python environment in the current directory in the folder venv.

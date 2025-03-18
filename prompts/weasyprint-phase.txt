@@ -1,8 +1,8 @@
 # Write a Python script that performs the following steps:
 #
-# 1. Use `openpyxl` to open the Excel workbook named "Timeline of Communications as of 2024-03-22.xlsx".
-#    - The workbook is within the attachments-EN folder (and so is all the attachment PDF files listed in the Excel sheet).
-#    - Read the sheet named "Attachments Prep".
+# 1. Use `openpyxl` to open the Excel workbook named "input-pdfs.xlsx".
+#    - The workbook is within the "input-files" folder (and so is all the attachment PDF files listed in the Excel sheet).
+#    - Read the Excel sheet named "Attachments Prep".
 #    - Ignore any rows that are headers or have "Exclude" set to a true-like value.
 #    - For each row, gather these fields:
 #         - Attachment Number
