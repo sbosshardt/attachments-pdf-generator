@@ -26,11 +26,14 @@ def generate_html(attachments):
         @page {
             size: 8.5in 11in;
             margin: 1in 1in 1in 1in;
+            /* Removing page numbers at bottom of pages */
+            /*
             @bottom-center {
                 content: counter(page);
                 font-family: Arial, sans-serif;
                 font-size: 10pt;
             }
+            */
         }
         
         @page :first {
@@ -40,11 +43,14 @@ def generate_html(attachments):
         }
         
         @page toc-page {
+            /* Removing page numbers at bottom of pages */
+            /*
             @bottom-center {
                 content: counter(page);
                 font-family: Arial, sans-serif;
                 font-size: 10pt;
             }
+            */
         }
         
         body {
