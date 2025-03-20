@@ -186,30 +186,95 @@ def create_bookmarks(merged_pdf, toc_page_index, bookmark_positions, attachment_
     Returns:
         None
     """
+    # Create a new outline/bookmarks from scratch
+    # Use a direct mapping and hardcoded approach
     toc = []
     
-    # First add TOC bookmark if we found the TOC page
-    if toc_page_index >= 0 and toc_page_index in page_mapping:
-        toc.append([1, "Table of Contents", page_mapping[toc_page_index]])
+    # NOTE: For PDF bookmark destinations, we need to add +1 to the page index
+    # This is because PyMuPDF (fitz) uses 0-based indexing internally
+    # but PDF specifications and viewers typically expect 1-based page numbers
     
-    # Add bookmarks for each attachment that we found a position for
-    for attachment_num in sorted(bookmark_positions.keys(), key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else float('inf')):
+    # Title page (always first page)
+    toc.append([1, "Title Page", 1])  # Page 1 (not 0) for PDF viewers
+    print(f"Adding bookmark: Title Page -> page 1")
+    
+    # Table of Contents (always second page)
+    toc.append([1, "Table of Contents", 2])  # Page 2 (not 1) for PDF viewers
+    print(f"Adding bookmark: Table of Contents -> page 2")
+    
+    # Create a simple map for scanning
+    page_info = {}
+    
+    # Scan the entire document to map attachment numbers to actual page indices
+    for i in range(2, merged_pdf.page_count):  # Start after TOC
+        page = merged_pdf[i]
+        text = page.get_text()
+        
+        # Check for attachment cover pages
+        if "Attachment " in text and "Page " in text:
+            # Extract the attachment number
+            try:
+                parts = text.split("Attachment ")
+                if len(parts) > 1:
+                    attachment_num = parts[1].split()[0].rstrip(":")
+                    page_info[attachment_num] = i
+                    print(f"Direct scan found Attachment {attachment_num} at page {i+1}")
+            except Exception as e:
+                print(f"Error parsing attachment from page {i+1}: {e}")
+    
+    # Add bookmarks for all attachments we found
+    for attachment_num in sorted(page_info.keys(), key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else float('inf')):
         attachment = attachment_map.get(attachment_num)
         if not attachment:
-            continue
-            
-        title = attachment.get('Title', 'Untitled')
+            title = f"Attachment {attachment_num}"
+        else:
+            title = f"Attachment {attachment_num}: {attachment.get('Title', 'Untitled')}"
         
-        # Add bookmark for this attachment's cover page
-        toc.append([1, f"Attachment {attachment_num}: {title}", bookmark_positions[attachment_num]])
+        page_idx = page_info[attachment_num]
+        # Add 1 to page_idx for PDF viewers' 1-based page numbering
+        toc.append([1, title, page_idx + 1])
+        print(f"Adding bookmark for Attachment {attachment_num} to page {page_idx+1}")
     
-    # Set the table of contents/bookmarks
-    if toc:
-        print(f"Setting {len(toc)} bookmarks in PDF")
+    # Set the bookmarks directly
+    print(f"Setting {len(toc)} bookmarks with 1-based page positions for PDF viewers")
+    
+    # Create a temporary file to save with bookmarks
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        # Save current state
+        merged_pdf.save(tmp.name)
+        # Close and reopen to ensure changes are applied
+        merged_pdf.close()
+        
+        # Reopen and set bookmarks
+        temp_pdf = fitz.open(tmp.name)
+        temp_pdf.set_toc(toc)
+        
+        # Save to final output
+        temp_pdf.save(MERGED_PDF)
+        
+        # Verify the bookmarks were set properly
+        new_toc = temp_pdf.get_toc()
+        temp_pdf.close()
+        
+        # Clean up
+        import os
         try:
-            merged_pdf.set_toc(toc)
-        except Exception as e:
-            print(f"Warning: Failed to set bookmarks: {e}")
+            os.unlink(tmp.name)
+        except:
+            pass
+    
+    # Reopen the merged PDF with bookmarks
+    new_pdf = fitz.open(MERGED_PDF)
+    new_toc = new_pdf.get_toc()
+    new_pdf.close()
+    
+    if new_toc:
+        print(f"Successfully set {len(new_toc)} bookmarks:")
+        for i, (level, title, page) in enumerate(new_toc):
+            print(f"  {title} -> page {page}")
+    else:
+        print("Warning: Bookmarks may not have been set correctly")
 
 def fix_links(merged_pdf, bookmark_positions):
     """
@@ -246,7 +311,11 @@ def fix_links(merged_pdf, bookmark_positions):
                     
                     # If we know the position of this attachment's cover page
                     if attachment_id in bookmark_positions:
+                        # For PDF links, use the actual page numbers as they appear
+                        # in the document (1-based), not the internal 0-based index
                         target_page = bookmark_positions[attachment_id]
+                        # For PDF specification, we need real page number
+                        # This ensures consistent behavior with PDF viewers
                         
                         # Create a new goto link
                         new_link = {
@@ -261,6 +330,7 @@ def fix_links(merged_pdf, bookmark_positions):
                         toc_page.delete_link(link)
                         toc_page.insert_link(new_link)
                         links_fixed += 1
+                        print(f"Fixed link to Attachment {attachment_id} -> page {target_page+1}")
         
         # Now check all pages for any other internal links that need fixing
         for page_num in range(merged_pdf.page_count):
@@ -292,6 +362,7 @@ def fix_links(merged_pdf, bookmark_positions):
                         page.delete_link(link)
                         page.insert_link(new_link)
                         links_fixed += 1
+                        print(f"Fixed link to Attachment {attachment_id} -> page {target_page+1}")
     
     except Exception as e:
         print(f"Warning: Error fixing links: {e}")
@@ -337,16 +408,24 @@ def merge_pdfs(attachments):
         merged_pdf, attachments, attachment_map, cover_page_indices
     )
     
-    # Create bookmarks/outline for the PDF
-    create_bookmarks(merged_pdf, toc_page_index, bookmark_positions, attachment_map, page_mapping)
-    
     # Fix links - update all links in the TOC to point to the correct pages
     links_fixed = fix_links(merged_pdf, bookmark_positions)
     
-    # Save the merged PDF
-    print(f"Saving merged PDF with {links_fixed} fixed links")
-    merged_pdf.save(MERGED_PDF)
+    # Save the merged PDF (without bookmarks for now)
+    temp_merged_file = MERGED_PDF + ".temp"
+    merged_pdf.save(temp_merged_file)
     final_page_count = len(merged_pdf)
     merged_pdf.close()
+    
+    # Now, create bookmarks on the saved file
+    # This function will load the file, add bookmarks, and save it back
+    merged_pdf = fitz.open(temp_merged_file)
+    create_bookmarks(merged_pdf, toc_page_index, bookmark_positions, attachment_map, page_mapping)
+    
+    # Clean up temporary file
+    try:
+        os.remove(temp_merged_file)
+    except:
+        pass  # Ignore errors
     
     print(f"Merged PDF created at: {MERGED_PDF} ({final_page_count} pages)") 

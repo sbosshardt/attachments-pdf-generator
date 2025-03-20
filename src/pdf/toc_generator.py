@@ -167,7 +167,7 @@ def generate_html(attachments):
         <table class="toc-table">
     """
     
-    # Calculate page numbers
+    # Calculate page numbers - accounting for title page
     page_map = calculate_page_map(sorted_data)
     
     # Add a TOC entry for each attachment
@@ -176,6 +176,10 @@ def generate_html(attachments):
         title = attachment.get('Title', 'Untitled')
         page_num = page_map.get(attachment_num, 0)
         
+        # Adjust page number to account for the actual position in the final merged PDF
+        # This ensures the page number shown in the TOC matches the real page number in the merged PDF
+        adjusted_page_num = page_num + 1  # +1 for the title page
+        
         # Add the TOC entry with table structure
         html += f"""
         <tr id="toc-entry-{attachment_num}">
@@ -183,7 +187,7 @@ def generate_html(attachments):
                 <a class="toc-link" href="#cover-{attachment_num}">Attachment {attachment_num}</a>
             </td>
             <td class="attachment-title">{title}</td>
-            <td class="page-num">{page_num}</td>
+            <td class="page-num">{adjusted_page_num}</td>
         </tr>
         """
     
@@ -199,11 +203,14 @@ def generate_html(attachments):
         title = attachment.get('Title', 'Untitled')
         page_number = page_map.get(attachment_num, 0)
         
+        # Adjust page number to account for the actual position in the final merged PDF
+        adjusted_page_number = page_number + 1  # +1 for the title page
+        
         html += f"""
     <div class="cover-page" id="cover-{attachment_num}">
         <div class="cover-title">{title}</div>
         <div class="cover-number">Attachment {attachment_num}</div>
-        <div class="cover-info">Page {page_number}</div>
+        <div class="cover-info">Page {adjusted_page_number}</div>
     </div>
     """
     
@@ -235,6 +242,7 @@ def calculate_page_map(attachments):
     toc_pages = max(1, min(3, (toc_entries + 24) // 25))  # Estimate 25 entries per page
     
     # Start page is calculated based on Title page + TOC pages + first cover
+    # Add 1 to account for the title page that will be added later
     start_page = 1 + toc_pages + 1  # Title page + TOC pages + first cover page
     
     # Track page counts for each attachment
@@ -367,15 +375,13 @@ def create_bookmarks(merged_pdf, attachment_pages, attachments):
     """
     bookmarks = []
     
-    # Add a bookmark for Table of Contents
-    toc_page_idx = -1
-    for page_idx in range(merged_pdf.page_count):
-        page = merged_pdf[page_idx]
-        text = page.get_text()
-        if "Table of Contents" in text:
-            toc_page_idx = page_idx
-            bookmarks.append([1, "Table of Contents", page_idx])
-            break
+    # Add a bookmark for Title Page (always the first page)
+    bookmarks.append([1, "Title Page", 0])
+    print(f"TOC Gen: Adding bookmark: Title Page -> page 1 (index 0)")
+    
+    # Add a bookmark for Table of Contents - always page 2 (index 1)
+    bookmarks.append([1, "Table of Contents", 1])
+    print(f"TOC Gen: Adding bookmark: Table of Contents -> page 2 (index 1)")
     
     # Create a mapping of attachment numbers to their data
     attachment_map = {}
@@ -383,22 +389,51 @@ def create_bookmarks(merged_pdf, attachment_pages, attachments):
         att_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
         attachment_map[att_num] = attachment
     
-    # Add bookmarks for each attachment
-    for att_num, page_idx in sorted(attachment_pages.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else float('inf')):
+    # Directly scan the PDF to find the exact page for each attachment
+    verified_positions = {}
+    for page_idx in range(2, merged_pdf.page_count):  # Start after TOC
+        page_text = merged_pdf[page_idx].get_text(sort=True)  # Using sort to improve text extraction
+        if "Attachment " in page_text and "Page " in page_text:
+            for att_num in attachment_pages.keys():
+                if f"Attachment {att_num}" in page_text:
+                    verified_positions[att_num] = page_idx
+                    print(f"TOC Gen: Found Attachment {att_num} cover page at page {page_idx+1} (index {page_idx})")
+                    break
+    
+    # Add bookmarks for each attachment with verified page positions
+    for att_num in sorted(attachment_pages.keys(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else float('inf')):
         attachment = attachment_map.get(att_num)
         if not attachment:
             continue
             
         title = attachment.get('Title', 'Untitled')
+        
+        # Use verified position if available, otherwise fall back to original mapping
+        if att_num in verified_positions:
+            page_idx = verified_positions[att_num]
+        else:
+            page_idx = attachment_pages[att_num]
+            print(f"TOC Gen: Warning - Using unverified position for Attachment {att_num}: page {page_idx+1}")
+        
+        print(f"TOC Gen: Adding bookmark: Attachment {att_num} -> page {page_idx+1} (index {page_idx})")
         bookmarks.append([1, f"Attachment {att_num}: {title}", page_idx])
     
     # Set the bookmarks
     if bookmarks:
         try:
-            print(f"Adding {len(bookmarks)} bookmarks to PDF")
+            print(f"TOC Gen: Adding {len(bookmarks)} bookmarks to PDF with explicit page positions")
             merged_pdf.set_toc(bookmarks)
+            
+            # Verify that the TOC was set correctly
+            new_toc = merged_pdf.get_toc()
+            print(f"TOC Gen: Verified TOC in PDF has {len(new_toc)} bookmarks")
+            
+            # Debug: print the actual TOC as stored in PDF
+            print("TOC Gen: DEBUG - Final bookmark positions in PDF:")
+            for i, (level, title, page) in enumerate(new_toc):
+                print(f"  TOC Gen: Bookmark {i+1}: {title} -> page {page+1}")
         except Exception as e:
-            print(f"Warning: Failed to add bookmarks: {e}")
+            print(f"TOC Gen: Warning: Failed to add bookmarks: {e}")
 
 def fix_pdf_links(pdf_doc, attachment_pages):
     """
