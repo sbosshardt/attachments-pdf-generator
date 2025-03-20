@@ -6,9 +6,10 @@ Create unified PDF content with table of contents and cover pages (relevant docu
 This repository holds tools and scripts to enable you to
 seamlessly generate:
 
-- A Table of Contents PDF page (with anchor-links)
+- A title page
+- A Table of Contents PDF page (with anchor-links and page numbers)
 - Cover pages for each attachment
-- Merge those into a single professional-looking PDF
+- Merge those into a single professional-looking PDF with each attachment immediately following its cover page
 - Include optional PDF outline (bookmarks)
 
 Optional steps like OCRmyPDF or link notations can be annexed via free software.
@@ -18,7 +19,13 @@ Optional steps like OCRmyPDF or link notations can be annexed via free software.
 This repo has the following folders/files:
 
 - `input-files/` - Directory for your incoming Excel data and original attachment PDFs
-- `output-files/` - Directory for the final products (merged PDFs, table of contents, etc.)
+  - `title-page.pdf` - Title page to include at the beginning of the document
+  - `input-pdfs.xlsx` - Excel file with attachment information
+  - Language subdirectories (e.g., `en/`) - For PDFs in different languages
+- `output-files/` - Directory for the final products
+  - `toc-coverpage.pdf` - Generated table of contents and cover pages only
+  - `weasyoutput.pdf` - Title page + TOC + cover pages
+  - `merged-attachments.pdf` - Complete document with all attachments
 - `prompts/` - Prompt files and other management files
 - `generate_toc_coverpage.py` - Script to generate table of contents and cover pages
 - `merge_pdfs.py` - Script to merge the TOC/cover pages with attachment PDFs
@@ -66,7 +73,8 @@ This creates an isolated Python environment in the current directory in the fold
      - Exclude (optional, set to true to exclude an attachment)
 
 2. Place your attachment PDFs:
-   - Put your PDF files in the `input-files` directory or language subdirectories (e.g., `input-files/en/`)
+   - Create a title page PDF named `title-page.pdf` in the `input-files` directory
+   - Put your PDF files in language subdirectories (e.g., `input-files/en/`)
    - Make sure the filenames match those in the "Filename Reference" column
 
 3. Run the script:
@@ -75,28 +83,31 @@ This creates an isolated Python environment in the current directory in the fold
    ```
 
 4. View the output files in the `output-files` directory:
-   - `weasyoutput.pdf` - Table of Contents and Cover Pages only
+   - `toc-coverpage.pdf` - Table of Contents and Cover Pages only
+   - `weasyoutput.pdf` - Title page + TOC + Cover Pages
    - `merged-attachments.pdf` - Complete document with attachments
 
 ## How It Works
 
 1. `generate_toc_coverpage.py`:
    - Reads attachment data from the Excel file
-   - Generates HTML with table of contents and cover pages
+   - Generates HTML with table of contents (with page numbers) and cover pages
    - Converts HTML to PDF using WeasyPrint
+   - Adds the title page to create the final weasyoutput.pdf
 
 2. `merge_pdfs.py`:
    - Reads attachment data from the Excel file
-   - Opens the TOC/cover pages PDF
-   - Merges it with all attachment PDFs
-   - Adds PDF bookmarks/outline
+   - Processes the weasyoutput.pdf page by page
+   - When it encounters a cover page, inserts the corresponding attachment PDF right after it
+   - Fixes internal links to ensure they work in the final PDF
+   - Adds PDF bookmarks/outline for navigation
    - Creates final merged PDF
 
 3. `generate_and_merge.sh`:
    - Runs both scripts in sequence with error handling
 
 ## Author
-Created by Samuel Bosshardt
+Created by Samuel Bosshardt with assistance from Cursor/Claude/ChatGPT.
 
-Licensed under MIT License or the license of your choice.
+Licensed under MIT License.
 
