@@ -8,6 +8,7 @@ import os
 # Input file paths
 EXCEL_FILE = os.path.join('input-files', 'input-pdfs.xlsx')
 TITLE_PAGE = os.path.join('input-files', 'title-page.pdf')
+FOREWORD_PAGE = os.path.join('input-files', 'foreword.pdf')
 
 # Output file paths
 OUTPUT_DIR = 'output-files'

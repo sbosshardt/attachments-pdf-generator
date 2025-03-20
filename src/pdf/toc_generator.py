@@ -6,7 +6,7 @@ Module for generating Table of Contents and cover pages.
 from weasyprint import HTML
 import fitz
 import os
-from src.config.paths import OUTPUT_HTML, OUTPUT_TOC, OUTPUT_PDF, TITLE_PAGE
+from src.config.paths import OUTPUT_HTML, OUTPUT_TOC, OUTPUT_PDF, TITLE_PAGE, FOREWORD_PAGE
 from src.excel.excel_reader import normalize_attachment_number, normalize_page_count
 
 def generate_html(attachments):
@@ -19,39 +19,15 @@ def generate_html(attachments):
     Returns:
         str: HTML content for the PDF
     """
-    sorted_data = sorted(attachments, key=lambda x: float(x.get('Attachment Number', 0)))
+    sorted_data = sorted(attachments, key=lambda x: float(normalize_attachment_number(x.get('Attachment Number', 0))))
     
     # CSS styling for the document
     css = """
         @page {
             size: 8.5in 11in;
             margin: 1in 1in 1in 1in;
-            /* Removing page numbers at bottom of pages */
-            /*
-            @bottom-center {
-                content: counter(page);
-                font-family: Arial, sans-serif;
-                font-size: 10pt;
-            }
-            */
         }
         
-        @page :first {
-            @bottom-center {
-                content: '';  /* No page number on title page */
-            }
-        }
-        
-        @page toc-page {
-            /* Removing page numbers at bottom of pages */
-            /*
-            @bottom-center {
-                content: counter(page);
-                font-family: Arial, sans-serif;
-                font-size: 10pt;
-            }
-            */
-        }
         
         body {
             font-family: Arial, sans-serif;
@@ -147,6 +123,16 @@ def generate_html(attachments):
             font-size: 12pt;
             margin-bottom: 0.15in;
         }
+        
+        /* Special sections */
+        .toc-section {
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+        }
+        
+        .toc-section-title {
+            font-weight: bold;
+        }
     """
     
     # Start building the HTML document
@@ -162,12 +148,66 @@ def generate_html(attachments):
     
     # Add Table of Contents
     html += """
-    <div class="toc-container">
+    <div class="toc-container" id="table-of-contents">
         <h1>Table of Contents</h1>
         <table class="toc-table">
     """
     
-    # Calculate page numbers - accounting for title page
+    # Check if title page and foreword exist
+    title_page_count = 0
+    if os.path.exists(TITLE_PAGE):
+        title_pdf = fitz.open(TITLE_PAGE)
+        title_page_count = title_pdf.page_count
+        title_pdf.close()
+        
+    foreword_exists = os.path.exists(FOREWORD_PAGE)
+    foreword_page_count = 0
+    if foreword_exists:
+        foreword_pdf = fitz.open(FOREWORD_PAGE)
+        foreword_page_count = foreword_pdf.page_count
+        foreword_pdf.close()
+    
+    # Calculate TOC position
+    toc_start_page = 1 + title_page_count + foreword_page_count
+    
+    # Add title page entry to TOC
+    if os.path.exists(TITLE_PAGE):
+        html += f"""
+        <tr>
+            <td class="attachment-num">
+                <a class="toc-link" href="#title-page">Title Page</a>
+            </td>
+            <td class="attachment-title">Title Page</td>
+            <td class="page-num">1</td>
+        </tr>
+        """
+    
+    # Add foreword entry to TOC
+    if foreword_exists:
+        foreword_page = title_page_count + 1  # Foreword comes after title page
+        html += f"""
+        <tr>
+            <td class="attachment-num">
+                <a class="toc-link" href="#foreword">Foreword</a>
+            </td>
+            <td class="attachment-title">Foreword</td>
+            <td class="page-num">{foreword_page}</td>
+        </tr>
+        """
+    
+    # Add Table of Contents entry to itself
+    toc_page = title_page_count + foreword_page_count + 1  # TOC comes after title and foreword
+    html += f"""
+    <tr>
+        <td class="attachment-num">
+            <a class="toc-link" href="#table-of-contents">Table of Contents</a>
+        </td>
+        <td class="attachment-title">Table of Contents</td>
+        <td class="page-num">{toc_page}</td>
+    </tr>
+    """
+    
+    # Calculate page numbers
     page_map = calculate_page_map(sorted_data)
     
     # Add a TOC entry for each attachment
@@ -176,10 +216,6 @@ def generate_html(attachments):
         title = attachment.get('Title', 'Untitled')
         page_num = page_map.get(attachment_num, 0)
         
-        # Adjust page number to account for the actual position in the final merged PDF
-        # This ensures the page number shown in the TOC matches the real page number in the merged PDF
-        adjusted_page_num = page_num + 1  # +1 for the title page
-        
         # Add the TOC entry with table structure
         html += f"""
         <tr id="toc-entry-{attachment_num}">
@@ -187,7 +223,7 @@ def generate_html(attachments):
                 <a class="toc-link" href="#cover-{attachment_num}">Attachment {attachment_num}</a>
             </td>
             <td class="attachment-title">{title}</td>
-            <td class="page-num">{adjusted_page_num}</td>
+            <td class="page-num">{page_num}</td>
         </tr>
         """
     
@@ -197,20 +233,33 @@ def generate_html(attachments):
     </div>
     """
     
+    # Add title page placeholder if it exists
+    if os.path.exists(TITLE_PAGE):
+        html += """
+    <div class="cover-page" id="title-page">
+        <!-- Title page placeholder, will be replaced with actual title page PDF -->
+    </div>
+    """
+    
+    # Add foreword placeholder if it exists
+    if foreword_exists:
+        html += """
+    <div class="cover-page" id="foreword">
+        <!-- Foreword placeholder, will be replaced with actual foreword PDF -->
+    </div>
+    """
+    
     # Add cover pages for each attachment
     for attachment in sorted_data:
         attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
         title = attachment.get('Title', 'Untitled')
         page_number = page_map.get(attachment_num, 0)
         
-        # Adjust page number to account for the actual position in the final merged PDF
-        adjusted_page_number = page_number + 1  # +1 for the title page
-        
         html += f"""
     <div class="cover-page" id="cover-{attachment_num}">
         <div class="cover-title">{title}</div>
         <div class="cover-number">Attachment {attachment_num}</div>
-        <div class="cover-info">Page {adjusted_page_number}</div>
+        <div class="cover-info">Page {page_number}</div>
     </div>
     """
     
@@ -237,29 +286,46 @@ def calculate_page_map(attachments):
     Returns:
         dict: Mapping from attachment number to page number
     """
+    # Check if title page and foreword exist and get their page counts
+    title_page_count = 0
+    if os.path.exists(TITLE_PAGE):
+        title_pdf = fitz.open(TITLE_PAGE)
+        title_page_count = title_pdf.page_count
+        title_pdf.close()
+        
+    foreword_page_count = 0
+    if os.path.exists(FOREWORD_PAGE):
+        foreword_pdf = fitz.open(FOREWORD_PAGE)
+        foreword_page_count = foreword_pdf.page_count
+        foreword_pdf.close()
+    
     # Estimate TOC pages based on number of entries
-    toc_entries = len(attachments)
+    toc_entries = len(attachments) + (1 if os.path.exists(FOREWORD_PAGE) else 0)  # Add entry for foreword
     toc_pages = max(1, min(3, (toc_entries + 24) // 25))  # Estimate 25 entries per page
     
-    # Start page is calculated based on Title page + TOC pages + first cover
-    # Add 1 to account for the title page that will be added later
-    start_page = 1 + toc_pages + 1  # Title page + TOC pages + first cover page
+    # Each attachment has a cover page and content
+    # Title page (1) + Foreword (1) + TOC (1) + Cover page (1) + offset (1) = 5
+    # The "+1" offset is because the first attachment's content starts after its cover page
+    start_page = 1 + title_page_count + foreword_page_count + toc_pages + 1  
+    print(f"DEBUG: Calculating attachment pages starting from page {start_page}")
+    print(f"DEBUG: Title={title_page_count}, Foreword={foreword_page_count}, TOC={toc_pages}")
     
     # Track page counts for each attachment
     current_page = start_page
     page_map = {}
     
-    for attachment in attachments:
+    for attachment in sorted(attachments, key=lambda x: float(normalize_attachment_number(x.get('Attachment Number', 0)))):
         attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
         
         # Store the page number for this attachment
         page_map[attachment_num] = current_page
+        print(f"DEBUG: Setting Attachment {attachment_num} to page {current_page}")
         
         # Get the number of content pages for this attachment
         page_count = normalize_page_count(attachment.get('Page count', 1))
         
-        # Move to the next cover page
-        current_page += page_count + 1  # Add content pages plus next cover
+        # Cover page is already counted, just add content for the next attachment
+        current_page += (page_count + 1)  # Add content pages plus next cover
     
     return page_map
 
@@ -363,141 +429,178 @@ def add_manual_toc_links(pdf_doc):
 
 def create_bookmarks(merged_pdf, attachment_pages, attachments):
     """
-    Create bookmarks/outline for the PDF.
+    Create bookmarks for the PDF.
     
     Args:
-        merged_pdf: PyMuPDF document
-        attachment_pages: Dictionary mapping attachment numbers to page indices
-        attachments: List of attachment data dictionaries
-        
+        merged_pdf (fitz.Document): The merged PDF document
+        attachment_pages (dict): Mapping of attachment numbers to page indices
+        attachments (list): List of attachment data dictionaries
+    
     Returns:
-        None
+        bool: True if successful, False otherwise
     """
-    bookmarks = []
-    
-    # Add a bookmark for Title Page (always the first page)
-    bookmarks.append([1, "Title Page", 0])
-    print(f"TOC Gen: Adding bookmark: Title Page -> page 1 (index 0)")
-    
-    # Add a bookmark for Table of Contents - always page 2 (index 1)
-    bookmarks.append([1, "Table of Contents", 1])
-    print(f"TOC Gen: Adding bookmark: Table of Contents -> page 2 (index 1)")
-    
-    # Create a mapping of attachment numbers to their data
-    attachment_map = {}
-    for attachment in attachments:
-        att_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
-        attachment_map[att_num] = attachment
-    
-    # Directly scan the PDF to find the exact page for each attachment
-    verified_positions = {}
-    for page_idx in range(2, merged_pdf.page_count):  # Start after TOC
-        page_text = merged_pdf[page_idx].get_text(sort=True)  # Using sort to improve text extraction
-        if "Attachment " in page_text and "Page " in page_text:
-            for att_num in attachment_pages.keys():
-                if f"Attachment {att_num}" in page_text:
-                    verified_positions[att_num] = page_idx
-                    print(f"TOC Gen: Found Attachment {att_num} cover page at page {page_idx+1} (index {page_idx})")
-                    break
-    
-    # Add bookmarks for each attachment with verified page positions
-    for att_num in sorted(attachment_pages.keys(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else float('inf')):
-        attachment = attachment_map.get(att_num)
-        if not attachment:
-            continue
-            
-        title = attachment.get('Title', 'Untitled')
+    try:
+        # Create bookmarks based on actual page locations
+        toc_bookmarks = []
         
-        # Use verified position if available, otherwise fall back to original mapping
-        if att_num in verified_positions:
-            page_idx = verified_positions[att_num]
+        # Create mapping of attachment numbers to data
+        attachment_map = {}
+        for attachment in attachments:
+            att_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+            attachment_map[att_num] = attachment
+        
+        # Find TOC page and other special pages
+        toc_page_idx = -1
+        title_page_idx = 0  # Title page is always page 0 (first page)
+        foreword_page_idx = 1  # Foreword is always page 1 (second page)
+        
+        # Find the Table of Contents
+        for page_idx in range(merged_pdf.page_count):
+            page = merged_pdf[page_idx]
+            text = page.get_text()
+            if "Table of Contents" in text:
+                toc_page_idx = page_idx
+                print(f"Found TOC on page {toc_page_idx+1}")
+                break
+        
+        # Hard-code the page indices for the special pages to avoid any issues
+        title_page_exists = os.path.exists(TITLE_PAGE)
+        foreword_exists = os.path.exists(FOREWORD_PAGE)
+        
+        # Add title page bookmark
+        if title_page_exists:
+            toc_bookmarks.append([1, "Title Page", title_page_idx])
+            print(f"Adding bookmark: Title Page -> page {title_page_idx+1}")
+        
+        # Add foreword bookmark
+        if foreword_exists:
+            toc_bookmarks.append([1, "Foreword", foreword_page_idx])
+            print(f"Adding bookmark: Foreword -> page {foreword_page_idx+1}")
+        
+        # Add Table of Contents bookmark
+        if toc_page_idx >= 0:
+            toc_bookmarks.append([1, "Table of Contents", toc_page_idx])
+            print(f"Adding bookmark: Table of Contents -> page {toc_page_idx+1}")
+        
+        # Add bookmarks for each attachment
+        for attachment_num, page_idx in sorted(attachment_pages.items(), key=lambda x: float(x[0])):
+            attachment = attachment_map.get(attachment_num)
+            if not attachment:
+                continue
+            
+            title = attachment.get('Title', 'Untitled')
+            
+            # Add bookmark
+            toc_bookmarks.append([1, f"Attachment {attachment_num}: {title}", page_idx])
+            print(f"Adding bookmark for Attachment {attachment_num} to page {page_idx+1}")
+        
+        # Set the bookmarks
+        if toc_bookmarks:
+            print(f"Setting {len(toc_bookmarks)} bookmarks with 1-based page positions for PDF viewers")
+            merged_pdf.set_toc(toc_bookmarks)
+            
+            print(f"Successfully set {len(toc_bookmarks)} bookmarks:")
+            for i, bookmark in enumerate(toc_bookmarks):
+                level, title, page = bookmark
+                print(f"  {title} -> page {page+1}")
+            
+            return True
         else:
-            page_idx = attachment_pages[att_num]
-            print(f"TOC Gen: Warning - Using unverified position for Attachment {att_num}: page {page_idx+1}")
-        
-        print(f"TOC Gen: Adding bookmark: Attachment {att_num} -> page {page_idx+1} (index {page_idx})")
-        bookmarks.append([1, f"Attachment {att_num}: {title}", page_idx])
+            print("No bookmarks created")
+            return False
     
-    # Set the bookmarks
-    if bookmarks:
-        try:
-            print(f"TOC Gen: Adding {len(bookmarks)} bookmarks to PDF with explicit page positions")
-            merged_pdf.set_toc(bookmarks)
-            
-            # Verify that the TOC was set correctly
-            new_toc = merged_pdf.get_toc()
-            print(f"TOC Gen: Verified TOC in PDF has {len(new_toc)} bookmarks")
-            
-            # Debug: print the actual TOC as stored in PDF
-            print("TOC Gen: DEBUG - Final bookmark positions in PDF:")
-            for i, (level, title, page) in enumerate(new_toc):
-                print(f"  TOC Gen: Bookmark {i+1}: {title} -> page {page+1}")
-        except Exception as e:
-            print(f"TOC Gen: Warning: Failed to add bookmarks: {e}")
+    except Exception as e:
+        print(f"Error creating bookmarks: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 def fix_pdf_links(pdf_doc, attachment_pages):
     """
-    Fix links in the PDF to point to the correct pages.
+    Fix links in the PDF document.
     
     Args:
         pdf_doc: PyMuPDF document
         attachment_pages: Dictionary mapping attachment numbers to page indices
-        
+    
     Returns:
         int: Number of links fixed
     """
     links_fixed = 0
     
     try:
-        # Find the TOC page
+        # First locate TOC page
         toc_page_idx = -1
-        for i in range(pdf_doc.page_count):
-            page = pdf_doc[i]
+        title_page_idx = 0  # Title page is always the first page
+        foreword_page_idx = 1  # Foreword is always the second page
+        
+        for page_idx in range(pdf_doc.page_count):
+            page = pdf_doc[page_idx]
             text = page.get_text()
             if "Table of Contents" in text:
-                toc_page_idx = i
+                toc_page_idx = page_idx
+                print(f"Found TOC page at page {page_idx+1}")
                 break
         
-        if toc_page_idx < 0:
-            return 0  # No TOC page found
-        
-        # First fix links on the TOC page
-        toc_page = pdf_doc[toc_page_idx]
-        links = toc_page.get_links()
-        
-        for link in links:
-            if 'uri' in link and link['uri'].startswith('#cover-'):
-                attachment_id = link['uri'][7:]  # Remove '#cover-'
-                
-                if attachment_id in attachment_pages:
-                    target_page = attachment_pages[attachment_id]
-                    
-                    # Create a new goto link
+        # Fix links starting from TOC page
+        if toc_page_idx >= 0:
+            toc_page = pdf_doc[toc_page_idx]
+            links = toc_page.get_links()
+            
+            for link in links:
+                # Fix Title Page link
+                if 'uri' in link and link['uri'] == '#title-page':
+                    # Create a new goto link to the first page
                     new_link = {
                         'kind': fitz.LINK_GOTO,
                         'from': link['from'],
-                        'page': target_page,
+                        'page': title_page_idx,  # Title page is always page 0 (the first page)
                         'to': fitz.Point(0, 0),
                         'zoom': 0
                     }
-                    
                     # Remove old link and add new one
                     toc_page.delete_link(link)
                     toc_page.insert_link(new_link)
                     links_fixed += 1
-        
-        # Now fix links on other pages
-        for page_num in range(pdf_doc.page_count):
-            if page_num == toc_page_idx:
-                continue  # Skip TOC page
-                
-            page = pdf_doc[page_num]
-            links = page.get_links()
-            
-            for link in links:
-                if 'uri' in link and link['uri'].startswith('#cover-'):
-                    attachment_id = link['uri'][7:]
+                    print(f"Fixed link to Title Page -> page {title_page_idx+1}")
                     
+                # Fix Foreword link
+                elif 'uri' in link and link['uri'] == '#foreword':
+                    # Create a new goto link
+                    new_link = {
+                        'kind': fitz.LINK_GOTO,
+                        'from': link['from'],
+                        'page': foreword_page_idx,  # Foreword is always page 1 (the second page)
+                        'to': fitz.Point(0, 0),
+                        'zoom': 0
+                    }
+                    # Remove old link and add new one
+                    toc_page.delete_link(link)
+                    toc_page.insert_link(new_link)
+                    links_fixed += 1
+                    print(f"Fixed link to Foreword -> page {foreword_page_idx+1}")
+                    
+                # Fix Table of Contents link (self-reference)
+                elif 'uri' in link and link['uri'] == '#table-of-contents':
+                    # Create a new goto link
+                    new_link = {
+                        'kind': fitz.LINK_GOTO,
+                        'from': link['from'],
+                        'page': toc_page_idx,
+                        'to': fitz.Point(0, 0),
+                        'zoom': 0
+                    }
+                    # Remove old link and add new one
+                    toc_page.delete_link(link)
+                    toc_page.insert_link(new_link)
+                    links_fixed += 1
+                    print(f"Fixed link to Table of Contents -> page {toc_page_idx+1}")
+                    
+                # Fix attachment links
+                elif 'uri' in link and link['uri'].startswith('#cover-'):
+                    attachment_id = link['uri'][7:]  # Remove '#cover-'
+                    
+                    # If we have a page number for this attachment
                     if attachment_id in attachment_pages:
                         target_page = attachment_pages[attachment_id]
                         
@@ -511,10 +614,42 @@ def fix_pdf_links(pdf_doc, attachment_pages):
                         }
                         
                         # Remove old link and add new one
-                        page.delete_link(link)
-                        page.insert_link(new_link)
+                        toc_page.delete_link(link)
+                        toc_page.insert_link(new_link)
                         links_fixed += 1
+                        print(f"Fixed link to Attachment {attachment_id} -> page {target_page+1}")
+            
+            # Check other pages for links too
+            for page_num in range(pdf_doc.page_count):
+                if page_num == toc_page_idx:
+                    continue  # Skip the TOC page, already processed
+                    
+                page = pdf_doc[page_num]
+                links = page.get_links()
+                
+                for link in links:
+                    # If this is a named destination link
+                    if 'uri' in link and link['uri'].startswith('#cover-'):
+                        attachment_id = link['uri'][7:]  # Remove '#cover-'
                         
+                        # If we have a page number for this attachment
+                        if attachment_id in attachment_pages:
+                            target_page = attachment_pages[attachment_id]
+                            
+                            # Create a new goto link
+                            new_link = {
+                                'kind': fitz.LINK_GOTO,
+                                'from': link['from'],
+                                'page': target_page,
+                                'to': fitz.Point(0, 0),
+                                'zoom': 0
+                            }
+                            
+                            # Remove old link and add new one
+                            page.delete_link(link)
+                            page.insert_link(new_link)
+                            links_fixed += 1
+    
     except Exception as e:
         print(f"Warning: Error fixing links: {e}")
         import traceback
@@ -524,64 +659,192 @@ def fix_pdf_links(pdf_doc, attachment_pages):
 
 def generate_toc_pdf(attachments):
     """
-    Generate the TOC and cover pages PDF.
+    Generate the Table of Contents and cover pages PDF.
     
     Args:
-        attachments: List of attachment data dictionaries
-        
+        attachments: List of dictionaries containing attachment data
+    
     Returns:
-        dict: Mapping of attachment numbers to actual page indices
+        str: Path to the final PDF
     """
-    # Generate HTML content
+    # Estimate page counts and ordering
+    total_content_pages = 0
+    attachment_pages = {}
+    
+    # Count attachment pages
+    for attachment in attachments:
+        attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+        page_count = normalize_page_count(attachment.get('Page count', 1))
+        
+        attachment_pages[attachment_num] = page_count
+        total_content_pages += page_count
+        print(f"Attachment {attachment_num}: {page_count} page(s)")
+    
+    # Calculate total pages including cover pages
+    total_attachment_pages = total_content_pages + len(attachments)  # Content + cover pages
+    
+    # Check if title page exists
+    title_page_count = 0
+    if os.path.exists(TITLE_PAGE):
+        title_pdf = fitz.open(TITLE_PAGE)
+        title_page_count = title_pdf.page_count
+        title_pdf.close()
+    
+    # Check if foreword exists
+    foreword_page_count = 0
+    if os.path.exists(FOREWORD_PAGE):
+        foreword_pdf = fitz.open(FOREWORD_PAGE)
+        foreword_page_count = foreword_pdf.page_count
+        foreword_pdf.close()
+    
+    # Estimate TOC pages based on number of entries
+    toc_entries = len(attachments)
+    toc_pages = max(1, min(3, (toc_entries + 24) // 25))  # Estimate 25 entries per page
+    
+    # Calculate starting page number for the first attachment
+    start_page = 1 + title_page_count + foreword_page_count + toc_pages  # Title + Foreword + TOC pages
+    
+    # Calculate page numbers for displaying on cover pages
+    current_page = start_page
+    page_map = {}
+    
+    # Generate page map for TOC display
+    for attachment in sorted(attachments, key=lambda x: float(normalize_attachment_number(x.get('Attachment Number', 0)))):
+        attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+        page_map[attachment_num] = current_page
+        
+        # Get page count for this attachment
+        page_count = attachment_pages.get(attachment_num, 1)
+        
+        # Move to next cover page position
+        current_page += page_count + 1  # Current content + next cover
+    
+    # Generate HTML for TOC and cover pages
     html_content = generate_html(attachments)
     
-    # Convert HTML to PDF using WeasyPrint
+    # Save HTML for debugging
+    with open(OUTPUT_HTML, 'w') as f:
+        f.write(html_content)
+    print(f"Saved HTML to {OUTPUT_HTML} for debugging")
+    
+    # Convert HTML to PDF
     print(f"Generating TOC and cover pages: {OUTPUT_TOC}")
     HTML(string=html_content).write_pdf(OUTPUT_TOC)
     
-    # Check the generated PDF for links
-    toc_doc = fitz.open(OUTPUT_TOC)
+    # Add title page if it exists
+    final_pdf = add_title_page_to_toc()
     
-    # Add manual links if needed
-    if add_manual_toc_links(toc_doc):
-        toc_doc.save(OUTPUT_TOC)
+    # Map the actual cover page positions in the final PDF
+    attachment_pages = map_cover_pages()
     
-    toc_doc.close()
+    # Create bookmarks
+    create_bookmarks(final_pdf, attachment_pages, attachments)
     
-    # If title page exists, add it to the TOC PDF
-    if os.path.exists(TITLE_PAGE):
-        print(f"Adding title page from: {TITLE_PAGE}")
-        add_title_page_to_toc()
-    else:
-        # Just use the TOC PDF as the output
-        print(f"Title page not found at {TITLE_PAGE}, using TOC only")
-        import shutil
-        shutil.copy(OUTPUT_TOC, OUTPUT_PDF)
+    # Fix links in the PDF
+    links_fixed = fix_pdf_links(final_pdf, attachment_pages)
+    if links_fixed > 0:
+        print(f"Fixed {links_fixed} links in the PDF")
+        final_pdf.save(OUTPUT_PDF)
     
-    # Map the actual locations of cover pages
-    return map_cover_pages()
+    final_pdf.close()
+    
+    return OUTPUT_PDF
 
 def add_title_page_to_toc():
     """
-    Add the title page to the TOC PDF.
+    Add the title page to the Table of Contents PDF.
     
     Returns:
-        None
+        fitz.Document: The merged PDF with title page and TOC
     """
-    # Create a new PDF with title page followed by TOC and cover pages
-    merged_pdf = fitz.open()
+    if not os.path.exists(OUTPUT_TOC):
+        raise FileNotFoundError(f"TOC PDF not found: {OUTPUT_TOC}")
     
-    # Add the title page
-    title_pdf = fitz.open(TITLE_PAGE)
-    merged_pdf.insert_pdf(title_pdf)
-    
-    # Add the TOC and cover pages
-    toc_pdf = fitz.open(OUTPUT_TOC)
-    merged_pdf.insert_pdf(toc_pdf)
-    
-    # Save the merged PDF
-    merged_pdf.save(OUTPUT_PDF)
-    merged_pdf.close()
+    # Check if title page exists
+    if os.path.exists(TITLE_PAGE):
+        print(f"Adding title page from: {TITLE_PAGE}")
+        
+        # Create a new PDF with title page followed by TOC and cover pages
+        merged_pdf = fitz.open()
+        
+        # Add the title page
+        title_pdf = fitz.open(TITLE_PAGE)
+        title_page_count = title_pdf.page_count
+        merged_pdf.insert_pdf(title_pdf)
+        print(f"Title page has {title_page_count} page(s)")
+        title_pdf.close()
+        
+        # Add the foreword page if it exists
+        foreword_page_count = 0
+        if os.path.exists(FOREWORD_PAGE):
+            print(f"Adding foreword from: {FOREWORD_PAGE}")
+            foreword_pdf = fitz.open(FOREWORD_PAGE)
+            foreword_page_count = foreword_pdf.page_count
+            merged_pdf.insert_pdf(foreword_pdf)
+            print(f"Foreword has {foreword_page_count} page(s)")
+            foreword_pdf.close()
+        
+        # Add the TOC and cover pages
+        toc_pdf = fitz.open(OUTPUT_TOC)
+        
+        # Count actual pages with content (no blank pages)
+        content_pages = 0
+        blank_pages = []
+        for i in range(toc_pdf.page_count):
+            page = toc_pdf[i]
+            text = page.get_text().strip()
+            if not text:
+                blank_pages.append(i)
+                print(f"WARNING: Blank page detected in TOC PDF at index {i}")
+            else:
+                content_pages += 1
+        
+        # Insert only non-blank pages
+        for i in range(toc_pdf.page_count):
+            if i not in blank_pages:
+                merged_pdf.insert_pdf(toc_pdf, from_page=i, to_page=i)
+        
+        print(f"Added {content_pages} content pages from TOC PDF (skipped {len(blank_pages)} blank pages)")
+        toc_pdf.close()
+        
+        # Save merged PDF
+        merged_pdf.save(OUTPUT_PDF)
+        
+        return merged_pdf
+    else:
+        # If no title page, just use the TOC PDF as the output
+        print(f"Title page not found at {TITLE_PAGE}, using TOC only")
+        
+        # Check for and remove blank pages
+        toc_pdf = fitz.open(OUTPUT_TOC)
+        content_pages = 0
+        blank_pages = []
+        for i in range(toc_pdf.page_count):
+            page = toc_pdf[i]
+            text = page.get_text().strip()
+            if not text:
+                blank_pages.append(i)
+                print(f"WARNING: Blank page detected in TOC PDF at index {i}")
+            else:
+                content_pages += 1
+        
+        if blank_pages:
+            print(f"Removing {len(blank_pages)} blank pages from TOC PDF")
+            non_blank_pdf = fitz.open()
+            for i in range(toc_pdf.page_count):
+                if i not in blank_pages:
+                    non_blank_pdf.insert_pdf(toc_pdf, from_page=i, to_page=i)
+            non_blank_pdf.save(OUTPUT_PDF)
+            non_blank_pdf.close()
+            toc_pdf.close()
+        else:
+            # Just copy the file if no blank pages
+            import shutil
+            shutil.copy(OUTPUT_TOC, OUTPUT_PDF)
+            toc_pdf.close()
+            
+        print(f"PDF generated at: {OUTPUT_PDF}")
+        return fitz.open(OUTPUT_PDF)
 
 def map_cover_pages():
     """
@@ -592,11 +855,18 @@ def map_cover_pages():
     """
     pdf_doc = fitz.open(OUTPUT_PDF)
     actual_cover_pages = {}
+    blank_pages_found = 0
     
     print("Mapping actual cover page locations...")
     for page_idx in range(pdf_doc.page_count):
         page = pdf_doc[page_idx]
-        text = page.get_text()
+        text = page.get_text().strip()
+        
+        # Detect blank pages
+        if not text:
+            blank_pages_found += 1
+            print(f"WARNING: Found blank page at index {page_idx} (page {page_idx+1})")
+            continue
         
         # Skip TOC page
         if "Table of Contents" in text:
@@ -613,6 +883,13 @@ def map_cover_pages():
                     print(f"Found Attachment {attachment_num} on page {page_idx+1}")
                 except Exception:
                     pass
+    
+    # Remove blank pages if found
+    if blank_pages_found > 0:
+        print(f"WARNING: Detected {blank_pages_found} blank pages in the document")
+        
+        # We'll handle this by properly mapping pages in subsequent steps
+        # and ensuring bookmarks point to the correct pages
     
     # Fix links in the PDF
     links_fixed = fix_pdf_links(pdf_doc, actual_cover_pages)

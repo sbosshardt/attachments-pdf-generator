@@ -34,7 +34,17 @@ source ./venv/bin/activate
 
 # Run the main script
 echo -e "${BLUE}Starting PDF generation...${NC}"
-./generate_and_merge.sh
+
+# Run the two-step process
+echo "[1/2] Generating Table of Contents and Cover Pages PDF"
+python generate_toc_coverpage.py
+
+echo "[2/2] Merging with attachment PDFs"
+python merge_pdfs.py
+
+# Check bookmarks in the final PDF
+echo "[3/3] Checking bookmarks in the final PDF"
+python check_bookmarks.py
 
 echo -e "${GREEN}Process completed!${NC}"
 echo "Final output files should be in the output-files directory" 

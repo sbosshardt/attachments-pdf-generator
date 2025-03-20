@@ -125,4 +125,46 @@ def normalize_page_count(page_count):
             return int(float(page_count))
         except (ValueError, TypeError):
             return 1
-    return page_count 
+    return page_count
+
+def load_attachments_from_excel():
+    """
+    Load attachments from Excel file and prepare them for PDF merging.
+    This function normalizes attachment numbers and adds file paths.
+    
+    Returns:
+        list: List of dictionaries containing prepared attachment data
+    """
+    # Read raw data from Excel
+    attachments = read_attachment_data(for_toc=False)
+    
+    # Process each attachment
+    processed_attachments = []
+    for attachment in attachments:
+        # Normalize attachment number
+        attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+        
+        # Create a new dictionary with processed data
+        processed = {
+            'Number': attachment_num,
+            'Title': attachment.get('Title', f'Attachment {attachment_num}'),
+            'Language': attachment.get('Language', 'EN'),
+        }
+        
+        # Add file path
+        filename = attachment.get('Filename Reference', '')
+        if filename:
+            language = processed['Language'].lower()
+            filepath = os.path.join('input-files', language, filename)
+            processed['FilePath'] = filepath
+            
+            # Check if file exists
+            if not os.path.exists(filepath):
+                print(f"Warning: File for Attachment {attachment_num} not found: {filepath}")
+        
+        processed_attachments.append(processed)
+    
+    # Sort by attachment number
+    processed_attachments.sort(key=lambda x: float(x['Number']) if x['Number'].replace('.', '', 1).isdigit() else float('inf'))
+    
+    return processed_attachments 

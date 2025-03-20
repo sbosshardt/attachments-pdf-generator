@@ -5,7 +5,7 @@ Module for merging PDFs with attachments.
 
 import os
 import fitz
-from src.config.paths import OUTPUT_PDF, MERGED_PDF
+from src.config.paths import OUTPUT_PDF, MERGED_PDF, TITLE_PAGE, FOREWORD_PAGE
 from src.excel.excel_reader import normalize_attachment_number
 
 def build_attachment_map(attachments):
@@ -206,435 +206,307 @@ def insert_attachments(merged_pdf, attachments, attachment_map, cover_page_indic
     
     return page_mapping, bookmark_positions
 
-def create_bookmarks(merged_pdf, toc_page_index, bookmark_positions, attachment_map, page_mapping, toc_page_indices=None):
+def create_bookmarks(doc, toc_pdf, cover_page_info, title_page_exists=True, foreword_exists=True):
+    """Create bookmarks in the merged PDF document."""
+    if not doc or not toc_pdf:
+        return
+
+    # Initialize bookmarks list
+    bookmarks = []
+    
+    # Add title page bookmark
+    title_page_index = 1  # Title page is at page 1
+    bookmarks.append([1, "Title Page", title_page_index])
+    print(f"Adding bookmark: Title Page -> page {title_page_index}")
+    
+    # Add foreword bookmark if it exists
+    foreword_index = 2  # Foreword starts at page 2
+    if foreword_exists:
+        bookmarks.append([1, "Foreword", foreword_index])
+        print(f"Adding bookmark: Foreword -> page {foreword_index}")
+    
+    # Add TOC bookmark
+    toc_index = 3
+    bookmarks.append([1, "Table of Contents", toc_index])
+    print(f"Adding bookmark: Table of Contents -> page {toc_index}")
+    
+    # Add attachment bookmarks
+    for info in cover_page_info:
+        if 'attachment_num' in info and 'merged_page' in info and 'title' in info:
+            attachment_num = info['attachment_num']
+            merged_page = info['merged_page']
+            title = info['title']
+            
+            # Create bookmark title
+            bookmark_title = f"Attachment {attachment_num}: {title}"
+            
+            # Create bookmark with page offset
+            bookmarks.append([1, bookmark_title, merged_page+1])
+            print(f"Adding bookmark for Attachment {attachment_num} to page {merged_page+1}")
+    
+    # Set bookmarks in the document
+    if bookmarks:
+        print(f"Setting {len(bookmarks)} bookmarks with adjusted page positions for PDF viewers")
+        doc.set_toc(bookmarks)
+        
+        # Print confirmation of bookmarks
+        print("Successfully set", len(bookmarks), "bookmarks:")
+        for bookmark in bookmarks:
+            level, title, page = bookmark
+            # Display page number as 1-based for easier understanding
+            print(f"  {title} -> page {page}")
+    
+    return bookmarks
+
+def merge_pdfs(toc_pdf_path, attachments, output_file=MERGED_PDF):
     """
-    Create bookmarks/outline for the merged PDF.
+    Merge the TOC PDF and attachment PDFs into a single PDF
     
     Args:
-        merged_pdf: PyMuPDF document
-        toc_page_index: Primary page index of the TOC
-        bookmark_positions: Dictionary mapping attachment numbers to page indices
-        attachment_map: Dictionary mapping attachment numbers to attachment data
-        page_mapping: Dictionary mapping original page indices to new page indices
-        toc_page_indices: List of all TOC page indices (optional)
-        
-    Returns:
-        None
+        toc_pdf_path: Path to the TOC PDF file
+        attachments: List of dictionaries with attachment information
+        output_file: Path to the output PDF file
     """
-    # Use a direct mapping and hardcoded approach
-    toc = []
+    print(f"Merging PDFs into: {output_file}")
     
-    # NOTE: For PDF bookmark destinations, we need to add +1 to the page index
-    # This is because PyMuPDF (fitz) uses 0-based indexing internally
-    # but PDF specifications and viewers typically expect 1-based page numbers
+    # Create attachments map for easier lookups
+    attachment_map = {a['Number']: a for a in attachments}
     
-    # Title page (always first page)
-    toc.append([1, "Title Page", 1])  # Page 1 (not 0) for PDF viewers
-    print(f"Adding bookmark: Title Page -> page 1")
+    # Open TOC PDF
+    toc_pdf = fitz.open(toc_pdf_path)
+    print(f"TOC PDF has {toc_pdf.page_count} pages")
     
-    # Table of Contents (could span multiple pages)
-    if toc_page_indices and len(toc_page_indices) > 0:
-        # Add main TOC bookmark to the first TOC page
-        toc.append([1, "Table of Contents", toc_page_indices[0] + 1])
-        print(f"Adding bookmark: Table of Contents -> page {toc_page_indices[0]+1}")
+    # Scan the TOC PDF to find the main TOC page, and map pages to attachments
+    print("Scanning TOC PDF to locate cover pages and links...")
+    title_page_found = False
+    foreword_found = False
+    toc_page_indices = []
+    
+    # Looking for title page, foreword, TOC page
+    title_page_index = None
+    foreword_page_index = None
+    main_toc_page_index = None
+    
+    # Track found cover pages to avoid duplicates
+    found_cover_pages = set()
+    cover_page_info = []
+    
+    # First, check for title page and foreword
+    for i in range(toc_pdf.page_count):
+        page_text = toc_pdf[i].get_text()
         
-        # If there are additional TOC pages, add them as sub-bookmarks
-        if len(toc_page_indices) > 1:
-            for i, page_idx in enumerate(toc_page_indices[1:], 1):
-                toc.append([2, f"Table of Contents (continued {i})", page_idx + 1])
-                print(f"Adding bookmark: Table of Contents (continued {i}) -> page {page_idx+1}")
-    else:
-        # Fallback to the old behavior if no toc_page_indices provided
-        toc.append([1, "Table of Contents", 2])  # Page 2 (not 1) for PDF viewers
-        print(f"Adding bookmark: Table of Contents -> page 2")
+        # Check for title page (usually first page)
+        if i == 0:
+            title_page_index = i
+            title_page_found = True
+            print(f"Found title page at page {i+1}")
+        
+        # Check for foreword (usually second page)
+        if i == 1 and "foreword" in page_text.lower():
+            foreword_page_index = i
+            foreword_found = True
+            print(f"Found foreword on page {i+1}")
+        
+        # Check for TOC page
+        if "Table of Contents" in page_text and "Attachment" in page_text:
+            if main_toc_page_index is None:
+                main_toc_page_index = i
+                toc_page_indices.append(i)
+                print(f"Found main TOC page at page {i+1}")
+
+    # Now look for all attachment cover pages
+    for i in range(toc_pdf.page_count):
+        page_text = toc_pdf[i].get_text()
+        
+        # Skip TOC pages - they also contain attachment references
+        if i in toc_page_indices or "Table of Contents" in page_text:
+            continue
+            
+        # Check for attachment cover pages - ensure it's a cover page, not just a mention
+        if "Attachment " in page_text and "Page " in page_text:
+            # Extract the attachment number from the page text
+            import re
+            attachment_matches = re.findall(r'Attachment\s+(\d+\.?\d*)', page_text)
+            
+            if attachment_matches:
+                attachment_num = attachment_matches[0]
+                
+                # Skip if we already found this attachment's cover page
+                if attachment_num in found_cover_pages:
+                    continue
+                    
+                # Only process if this attachment number is in our list from Excel
+                if attachment_num in attachment_map:
+                    found_cover_pages.add(attachment_num)
+                    attachment_title = attachment_map[attachment_num].get('Title', 'Untitled')
+                    print(f"Found cover page for Attachment {attachment_num} on page {i+1}")
+                    
+                    cover_page_info.append({
+                        'attachment_num': attachment_num,
+                        'toc_page': i,
+                        'merged_page': i,  # Initial value, will be updated as we insert pages
+                        'title': attachment_title
+                    })
     
-    # Create a simple map for scanning
-    page_info = {}
+    # Get the links from the TOC page
+    links = []
+    if main_toc_page_index is not None:
+        links = toc_pdf[main_toc_page_index].get_links()
+        print(f"Found {len(links)} TOC pages with {len(links)} total links")
     
-    # Scan the entire document to map attachment numbers to actual page indices
-    for i in range(2, merged_pdf.page_count):  # Start after TOC
-        page = merged_pdf[i]
+    # Report cover pages found
+    print(f"Found {len(cover_page_info)} cover pages")
+    
+    # Create a merged PDF document starting with the TOC PDF
+    merged_pdf = fitz.open()
+    
+    # Add TOC PDF pages to the merged PDF
+    merged_pdf.insert_pdf(toc_pdf)
+    
+    # Track page offsets for bookmarks and links
+    page_offset = 0
+    page_mapping = {}  # Maps toc_page -> merged_page
+    bookmark_positions = {}  # Maps attachment_num -> page_index
+    
+    # Sort cover page info by attachment number to ensure consistent order
+    cover_page_info.sort(key=lambda x: float(x['attachment_num']) if x['attachment_num'].replace('.', '', 1).isdigit() else float('inf'))
+    
+    # Process each attachment
+    for i, info in enumerate(cover_page_info):
+        attachment_num = info['attachment_num']
+        attachment = attachment_map.get(attachment_num, {})
+        filepath = attachment.get('FilePath')
+        
+        if not filepath or not os.path.exists(filepath):
+            print(f"Warning: File for Attachment {attachment_num} not found: {filepath}")
+            continue
+        
+        # Open the attachment PDF
+        try:
+            attachment_pdf = fitz.open(filepath)
+            num_pages = attachment_pdf.page_count
+            
+            # Get the position to insert after (the cover page)
+            insert_after = info['toc_page']
+            
+            # Define where to insert this attachment's pages after its cover page
+            insert_position = insert_after + 1 + page_offset
+            print(f"Inserting {num_pages} pages for Attachment {attachment_num} after position {insert_position}")
+            
+            # Insert the attachment PDF after its cover page
+            merged_pdf.insert_pdf(attachment_pdf, from_page=0, to_page=num_pages-1, start_at=insert_position)
+            
+            # Record bookmark position
+            bookmark_positions[attachment_num] = insert_after + page_offset
+            
+            # Update page_mapping
+            toc_page = info['toc_page']
+            page_mapping[toc_page] = toc_page + page_offset
+            
+            # Update the merged_page in cover_page_info
+            info['merged_page'] = toc_page + page_offset
+            
+            # Update the page offset for subsequent insertions
+            page_offset += num_pages
+            
+            # Close the attachment PDF
+            attachment_pdf.close()
+            
+            # Print confirmation
+            print(f"Added: {os.path.basename(filepath)} ({num_pages} pages)")
+            
+        except Exception as e:
+            print(f"Error adding Attachment {attachment_num}: {e}")
+    
+    # Create bookmarks for the merged PDF
+    create_bookmarks(merged_pdf, toc_pdf, cover_page_info, 
+                    title_page_exists=(title_page_index is not None),
+                    foreword_exists=(foreword_page_index is not None))
+    
+    # Fix links in the merged PDF - look for all TOC pages
+    toc_pages_merged = []
+    for i in range(merged_pdf.page_count):
+        page_text = merged_pdf[i].get_text()
+        if "Table of Contents" in page_text:
+            toc_pages_merged.append(i)
+            print(f"Found TOC on page {i+1}")
+            
+    # Fix links on all TOC pages
+    for toc_page in toc_pages_merged:
+        page = merged_pdf[toc_page]
+        links = page.get_links()
+        print(f"Fixing links on TOC page (page {toc_page+1})")
+        print(f"Found {len(links)} links on TOC page {toc_page+1}")
+        
+        # Look for potential attachment references in the TOC
         text = page.get_text()
         
-        # Check for attachment cover pages
-        if "Attachment " in text and "Page " in text:
-            # Extract the attachment number
-            try:
-                parts = text.split("Attachment ")
-                if len(parts) > 1:
-                    attachment_num = parts[1].split()[0].rstrip(":")
-                    page_info[attachment_num] = i
-                    print(f"Direct scan found Attachment {attachment_num} at page {i+1}")
-            except Exception as e:
-                print(f"Error parsing attachment from page {i+1}: {e}")
-    
-    # Add bookmarks for all attachments we found
-    for attachment_num in sorted(page_info.keys(), key=lambda x: float(x) if x.replace('.', '', 1).isdigit() else float('inf')):
-        attachment = attachment_map.get(attachment_num)
-        if not attachment:
-            title = f"Attachment {attachment_num}"
-        else:
-            title = f"Attachment {attachment_num}: {attachment.get('Title', 'Untitled')}"
+        # Extract text line by line for more accurate processing
+        lines = text.split('\n')
         
-        page_idx = page_info[attachment_num]
-        # Add 1 to page_idx for PDF viewers' 1-based page numbering
-        toc.append([1, title, page_idx + 1])
-        print(f"Adding bookmark for Attachment {attachment_num} to page {page_idx+1}")
-    
-    # Set the bookmarks directly
-    print(f"Setting {len(toc)} bookmarks with 1-based page positions for PDF viewers")
-    
-    # Create a temporary file to save with bookmarks
-    import tempfile
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        # Save current state
-        merged_pdf.save(tmp.name)
-        # Close and reopen to ensure changes are applied
-        merged_pdf.close()
+        # Look for potential attachment entries in various formats
+        import re
+        potential_attachments = set()
         
-        # Reopen and set bookmarks
-        temp_pdf = fitz.open(tmp.name)
-        temp_pdf.set_toc(toc)
+        for line in lines:
+            # Search for standard format "Attachment X" or "Attachment X:"
+            std_matches = re.findall(r"Attachment\s+(\d+\.?\d*)", line)
+            if std_matches:
+                for match in std_matches:
+                    potential_attachments.add(match)
         
-        # Save to final output
-        temp_pdf.save(MERGED_PDF)
-        
-        # Verify the bookmarks were set properly
-        new_toc = temp_pdf.get_toc()
-        temp_pdf.close()
-        
-        # Clean up
-        import os
-        try:
-            os.unlink(tmp.name)
-        except:
-            pass
-    
-    # Reopen the merged PDF with bookmarks
-    new_pdf = fitz.open(MERGED_PDF)
-    new_toc = new_pdf.get_toc()
-    new_pdf.close()
-    
-    if new_toc:
-        print(f"Successfully set {len(new_toc)} bookmarks:")
-        for i, (level, title, page) in enumerate(new_toc):
-            print(f"  {title} -> page {page}")
-    else:
-        print("Warning: Bookmarks may not have been set correctly")
-
-def fix_links(merged_pdf, bookmark_positions):
-    """
-    Fix all internal links in the merged PDF.
-    
-    Args:
-        merged_pdf: PyMuPDF document
-        bookmark_positions: Dictionary mapping attachment numbers to page indices
-        
-    Returns:
-        int: Number of links fixed
-    """
-    links_fixed = 0
-    
-    try:
-        # Find TOC pages (should be just pages 2 and 3, indices 1 and 2)
-        toc_pages = []
-        
-        # First check for primary TOC page (always has "Table of Contents" heading)
-        for i in range(min(5, merged_pdf.page_count)):  # Only check first few pages
-            text = merged_pdf[i].get_text()
-            if "Table of Contents" in text:
-                toc_pages.append(i)
-                print(f"Found main TOC page at page {i+1}")
-                
-                # The next page might be TOC continuation
-                if i+1 < merged_pdf.page_count:
-                    next_page_text = merged_pdf[i+1].get_text()
-                    # If next page has attachment entries but not a cover page
-                    if "Attachment " in next_page_text and "Page " not in next_page_text:
-                        toc_pages.append(i+1)
-                        print(f"Found TOC continuation page at page {i+2}")
-                break
-        
-        # Process all TOC pages
-        for toc_page_pos in toc_pages:
-            print(f"Fixing links on TOC page (page {toc_page_pos+1})")
-            toc_page = merged_pdf[toc_page_pos]
-            links = toc_page.get_links()
-            print(f"Found {len(links)} links on TOC page {toc_page_pos+1}")
+        if potential_attachments:
+            print(f"Found potential attachments on page {toc_page+1}: {', '.join(sorted(potential_attachments))}")
             
-            # Look for all references to attachments in the TOC text
-            text = toc_page.get_text()
-            
-            # Extract text line by line for more accurate processing
-            lines = text.split('\n')
-            
-            # Look for potential attachment entries in various formats
-            import re
-            potential_attachments = set()
-            
-            for line in lines:
-                # Search for standard format "Attachment X" or "Attachment X:"
-                std_matches = re.findall(r"Attachment\s+(\d+\.?\d*)", line)
-                if std_matches:
-                    for match in std_matches:
-                        potential_attachments.add(match)
-                
-                # Search for "Attachment X - Description"
-                alt_matches = re.findall(r"Attachment\s+(\d+\.?\d*)\s*[:-]", line)
-                if alt_matches:
-                    for match in alt_matches:
-                        potential_attachments.add(match)
-            
-            # Print all potential attachments found on this page
-            if potential_attachments:
-                print(f"Found potential attachments on page {toc_page_pos+1}: {', '.join(sorted(potential_attachments))}")
-            
-            # Create links for each attachment found on this page
+            # Create links for attachments found on this page
             for attachment_id in potential_attachments:
                 if attachment_id in bookmark_positions:
                     target_page = bookmark_positions[attachment_id]
                     
                     # Find the text in the TOC page
                     search_text = f"Attachment {attachment_id}"
-                    rects = toc_page.search_for(search_text)
+                    rects = page.search_for(search_text)
                     
                     if rects:
-                        # The rectangle around the attachment number text in TOC
-                        rect = rects[0]
-                        
-                        # Create a new goto link
+                        # Create a new link
                         new_link = {
                             'kind': fitz.LINK_GOTO,
-                            'from': rect,
+                            'from': rects[0],  # use the first occurrence
                             'page': target_page,
                             'to': fitz.Point(0, 0),
                             'zoom': 0
                         }
                         
                         # Add the new link
-                        toc_page.insert_link(new_link)
-                        links_fixed += 1
-                        print(f"Created link for {search_text} pointing to page {target_page+1}")
-            
-            # Now check if there were original links and fix them if needed
-            for link in links:
-                if 'uri' in link and link['uri'].startswith('#cover-'):
-                    attachment_id = link['uri'][7:]  # Remove '#cover-'
-                    
-                    # If we know the position of this attachment's cover page
-                    if attachment_id in bookmark_positions:
-                        # For PDF links, use the actual page numbers as they appear
-                        # in the document (1-based), not the internal 0-based index
-                        target_page = bookmark_positions[attachment_id]
-                        # For PDF specification, we need real page number
-                        # This ensures consistent behavior with PDF viewers
-                        
-                        # Create a new goto link
-                        new_link = {
-                            'kind': fitz.LINK_GOTO,
-                            'from': link['from'],
-                            'page': target_page,
-                            'to': fitz.Point(0, 0),
-                            'zoom': 0
-                        }
-                        
-                        # Remove old link and add new one
-                        toc_page.delete_link(link)
-                        toc_page.insert_link(new_link)
-                        links_fixed += 1
-                        print(f"Fixed existing link to Attachment {attachment_id} -> page {target_page+1}")
-        
-        # Now check all pages for any other internal links that need fixing
-        for page_num in range(merged_pdf.page_count):
-            if page_num in toc_pages:
-                continue  # Skip TOC pages as we've already processed them
-                
-            page = merged_pdf[page_num]
-            links = page.get_links()
-            
-            for link in links:
-                # If this is a named destination link
-                if 'uri' in link and link['uri'].startswith('#cover-'):
-                    attachment_id = link['uri'][7:]  # Remove '#cover-'
-                    
-                    # If we know the position of this attachment's cover page
-                    if attachment_id in bookmark_positions:
-                        target_page = bookmark_positions[attachment_id]
-                        
-                        # Create a new goto link
-                        new_link = {
-                            'kind': fitz.LINK_GOTO,
-                            'from': link['from'],
-                            'page': target_page,
-                            'to': fitz.Point(0, 0),
-                            'zoom': 0
-                        }
-                        
-                        # Remove old link and add new one
-                        page.delete_link(link)
                         page.insert_link(new_link)
-                        links_fixed += 1
-                        print(f"Fixed link to Attachment {attachment_id} -> page {target_page+1}")
+                        print(f"Created link for {search_text} pointing to page {target_page+1}")
     
-    except Exception as e:
-        print(f"Warning: Error fixing links: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    return links_fixed
-
-def merge_pdfs(attachments):
-    """
-    Merge the TOC PDF with the attachment PDFs, placing each attachment after its cover page.
-    
-    Args:
-        attachments (list): List of attachment data dictionaries
-    """
-    print(f"Merging PDFs into: {MERGED_PDF}")
-    
-    # Check if TOC PDF exists
-    if not os.path.exists(OUTPUT_PDF):
-        raise FileNotFoundError(f"Table of contents PDF not found: {OUTPUT_PDF}")
-    
-    # Load the TOC and cover pages PDF
-    toc_pdf = fitz.open(OUTPUT_PDF)
-    print(f"TOC PDF has {len(toc_pdf)} pages")
-    
-    # Create a new document for the final merged PDF
-    merged_pdf = fitz.open()
-    
-    # Build a mapping of attachment numbers to their data
-    attachment_map = build_attachment_map(attachments)
-    
-    # First, scan the TOC PDF to locate all cover pages and links
-    print("Scanning TOC PDF to locate cover pages and links...")
-    toc_page_index, toc_links, toc_page_indices = locate_toc_page(toc_pdf)
-    print(f"Found {len(toc_links)} TOC links")
-    
-    # Next, identify all cover pages by text pattern
-    cover_page_indices = locate_cover_pages(toc_pdf, attachment_map)
-    print(f"Found {len(cover_page_indices)} cover pages")
-    
-    # Now process the TOC PDF and insert attachments
-    page_mapping, bookmark_positions = insert_attachments(
-        merged_pdf, attachments, attachment_map, cover_page_indices
-    )
-    
-    # Fix links - update all links in the TOC to point to the correct pages
-    links_fixed = fix_links(merged_pdf, bookmark_positions)
-    print(f"Fixed {links_fixed} links in merged PDF")
-    
-    # Save the merged PDF (without bookmarks for now)
-    temp_merged_file = MERGED_PDF + ".temp"
-    merged_pdf.save(temp_merged_file)
-    final_page_count = len(merged_pdf)
-    merged_pdf.close()
-    
-    # Now, create bookmarks on the saved file
-    # This function will load the file, add bookmarks, and save it back
-    merged_pdf = fitz.open(temp_merged_file)
-    create_bookmarks(merged_pdf, toc_page_index, bookmark_positions, attachment_map, page_mapping, toc_page_indices)
-    
-    # Check if we need to fix links in the final PDF
+    # Save the merged PDF
     try:
-        # Reopen the final PDF and fix links again to ensure they're preserved
-        final_pdf = fitz.open(MERGED_PDF)
+        merged_pdf.save(output_file)
+        page_count = merged_pdf.page_count
+        merged_pdf.close()
         
-        # Find all TOC pages - same logic as in fix_links
-        toc_pages = []
+        print(f"Merged PDF created at: {output_file} ({page_count} pages)")
         
-        # First check for primary TOC page (always has "Table of Contents" heading)
-        for i in range(min(5, final_pdf.page_count)):  # Only check first few pages
-            text = final_pdf[i].get_text()
-            if "Table of Contents" in text:
-                toc_pages.append(i)
-                print(f"Found main TOC page at page {i+1} in final PDF")
-                
-                # The next page might be TOC continuation
-                if i+1 < final_pdf.page_count:
-                    next_page_text = final_pdf[i+1].get_text()
-                    # If next page has attachment entries but not a cover page
-                    if "Attachment " in next_page_text and "Page " not in next_page_text:
-                        toc_pages.append(i+1)
-                        print(f"Found TOC continuation page at page {i+2} in final PDF")
+        # Print debug info about bookmarks in the final PDF
+        print("\nDEBUG - Bookmarks in final PDF:")
+        doc = fitz.open(output_file)
+        toc = doc.get_toc()
+        print(f"Total bookmarks: {len(toc)}")
+        print("First few bookmarks:")
+        for level, title, page in toc[:5]:
+            print(f"  {title} -> page {page+1}")
+        
+        # Check for Foreword bookmark specifically
+        for item in toc:
+            if 'Foreword' in item[1]:
+                level, title, page = item
+                print(f"  Foreword bookmark -> page {page+1}")
                 break
-        
-        # Check if links are present on all TOC pages
-        links_missing = False
-        total_links = 0
-        expected_links = 0
-        
-        for toc_page_pos in toc_pages:
-            toc_page = final_pdf[toc_page_pos]
-            links = toc_page.get_links()
-            total_links += len(links)
-            print(f"Found {len(links)} links on TOC page {toc_page_pos+1} in final PDF")
-            
-            # Look for all references to attachments in the TOC text
-            text = toc_page.get_text()
-            
-            # Extract text line by line for more accurate processing
-            lines = text.split('\n')
-            
-            # Look for potential attachment entries in various formats
-            import re
-            potential_attachments = set()
-            
-            for line in lines:
-                # Search for standard format "Attachment X" or "Attachment X:"
-                std_matches = re.findall(r"Attachment\s+(\d+\.?\d*)", line)
-                if std_matches:
-                    for match in std_matches:
-                        potential_attachments.add(match)
                 
-                # Search for "Attachment X - Description"
-                alt_matches = re.findall(r"Attachment\s+(\d+\.?\d*)\s*[:-]", line)
-                if alt_matches:
-                    for match in alt_matches:
-                        potential_attachments.add(match)
-            
-            # Count valid attachment references
-            count_attachment_entries = sum(1 for att_id in potential_attachments if att_id in bookmark_positions)
-            expected_links += count_attachment_entries
-            
-            # If we have fewer links than attachment entries, we have missing links
-            if len(links) < count_attachment_entries:
-                links_missing = True
-                print(f"WARNING: Page {toc_page_pos+1} has {len(links)} links but {count_attachment_entries} attachment entries")
-        
-        print(f"Expected total links across all TOC pages: {expected_links}, Found: {total_links}")
-        
-        # If any TOC page has missing links, reapply the links
-        if links_missing or total_links < expected_links:
-            print(f"Warning: Some links were lost during bookmark creation. Fixing links in final PDF...")
-            links_fixed = fix_links(final_pdf, bookmark_positions)
-            print(f"Fixed {links_fixed} links in final PDF after bookmarks")
-            
-            # We can't save directly to the same file, so use a temporary file
-            temp_final_file = MERGED_PDF + ".final.temp"
-            final_pdf.save(temp_final_file)
-            final_pdf.close()
-            
-            # Now move the temporary file to the target location
-            import shutil
-            shutil.copy(temp_final_file, MERGED_PDF)
-            
-            try:
-                os.remove(temp_final_file)
-            except:
-                pass  # Ignore errors if we can't remove the temp file
-        else:
-            # Close the PDF since we didn't need to modify it
-            final_pdf.close()
+        doc.close()
     except Exception as e:
-        print(f"Warning: Error when checking links in final PDF: {e}")
-        # Don't rethrow the exception, since the PDF should be functional
-    
-    # Clean up temporary file
-    try:
-        os.remove(temp_merged_file)
-    except:
-        pass  # Ignore errors
-    
-    print(f"Merged PDF created at: {MERGED_PDF} ({final_page_count} pages)")
-    print(f"Table of Contents links and bookmarks have been properly set for all attachments") 
+        print(f"Error saving PDF: {e}")
+        import traceback
+        traceback.print_exc() 

@@ -15,6 +15,7 @@ import fitz  # PyMuPDF
 # File paths
 EXCEL_FILE = os.path.join('input-files', 'input-pdfs.xlsx')
 TITLE_PAGE = os.path.join('input-files', 'title-page.pdf')
+FOREWORD_PAGE = os.path.join('input-files', 'foreword.pdf')
 OUTPUT_TOC = os.path.join('output-files', 'toc-coverpage.pdf')
 OUTPUT_PDF = os.path.join('output-files', 'weasyoutput.pdf')
 
@@ -114,22 +115,10 @@ def generate_html(data):
         @page {
             size: 8.5in 11in;
             margin: 1in 1in 1in 1in;
-            @bottom-center {
-                content: counter(page);
-                font-family: Arial, sans-serif;
-                font-size: 10pt;
-            }
-        }
-        
-        @page :first {
-            @bottom-center {
-                content: '';  /* No page number on title page */
-            }
         }
         
         @page toc-page {
             @bottom-center {
-                content: counter(page);
                 font-family: Arial, sans-serif;
                 font-size: 10pt;
             }
@@ -251,8 +240,9 @@ def generate_html(data):
     
     # Start page is calculated based on Title page + TOC pages + first cover
     toc_entries = len(sorted_data)
-    toc_pages = max(1, min(3, (toc_entries + 24) // 25))  # Estimate 25 entries per page
-    start_page = 1 + toc_pages + 1  # Title page + TOC pages + first cover page
+    toc_pages = max(1, min(3, (toc_entries + 14) // 15))  # Estimate 15 entries per page
+    foreword_pages = determine_foreword_page_count()
+    start_page = 1 + foreword_pages + toc_pages + 1  # Title page + Foreword + TOC pages + first cover page
     
     # Track page counts for each attachment
     current_page = start_page
@@ -331,6 +321,18 @@ def generate_html(data):
     
     return html
 
+def determine_foreword_page_count():
+    """
+    Determine the number of pages in the foreword.
+    """
+    if os.path.exists(FOREWORD_PAGE):
+        foreword_pdf = fitz.open(FOREWORD_PAGE)
+        foreword_pages = len(foreword_pdf)
+        foreword_pdf.close()
+        return foreword_pages
+    else:
+        return 0
+
 def main():
     """
     Main function to run the script.
@@ -372,13 +374,18 @@ def main():
         
         # Estimate TOC pages based on number of entries
         toc_entries = len(attachments)
-        toc_pages = max(1, min(3, (toc_entries + 24) // 25))  # Estimate 25 entries per page
+        toc_pages = max(1, min(3, (toc_entries + 14) // 15))  # Estimate 15 entries per page
         
-        # Total estimated pages: Title page + TOC pages + attachment pages (content + covers)
-        estimated_total = 1 + toc_pages + total_attachment_pages
+        # Check if foreword exists
+        foreword_pages = determine_foreword_page_count()
+        
+        # Total estimated pages: Title page + Foreword + TOC pages + attachment pages (content + covers)
+        estimated_total = 1 + foreword_pages + toc_pages + total_attachment_pages
         
         print(f"\nPage count summary:")
         print(f"- Title page: 1 page")
+        if foreword_pages > 0:
+            print(f"- Foreword: {foreword_pages} page(s)")
         print(f"- Table of Contents: approximately {toc_pages} pages ({toc_entries} entries)")
         print(f"- Cover pages: {len(attachments)} pages (one per attachment)")
         print(f"- Attachment content: {total_content_pages} pages")
@@ -388,7 +395,7 @@ def main():
         print("\nDEBUG - Page numbering verification:")
         
         # Calculate expected page numbers
-        start_page = 1 + toc_pages + 1  # Title page + TOC pages + first cover
+        start_page = 1 + foreword_pages + toc_pages + 1  # Title page + Foreword + TOC pages + first cover
         current_page = start_page
         
         # Page map to use for both TOC display and bookmarks
@@ -496,107 +503,89 @@ def main():
             merged_pdf.insert_pdf(title_pdf)
             print(f"Title page has {title_page_count} page(s)")
             
+            # Add the foreword if it exists
+            foreword_page_offset = title_page_count
+            if os.path.exists(FOREWORD_PAGE):
+                print(f"Adding foreword from: {FOREWORD_PAGE}")
+                foreword_pdf = fitz.open(FOREWORD_PAGE)
+                foreword_page_count = len(foreword_pdf)
+                merged_pdf.insert_pdf(foreword_pdf)
+                print(f"Foreword has {foreword_page_count} page(s)")
+                foreword_page_offset = title_page_count
+            else:
+                foreword_page_count = 0
+            
             # Add the TOC and cover pages
             toc_pdf = fitz.open(OUTPUT_TOC)
+            toc_page_count = len(toc_pdf)
             merged_pdf.insert_pdf(toc_pdf)
             
-            # Get actual page number mapping by analyzing the document content
-            # This is more reliable than our calculations because it's based on the actual PDF
-            final_page_count = len(merged_pdf)
-            print(f"PDF has {final_page_count} pages total")
+            # Create bookmarks for the PDF
+            toc = []
             
-            # Initialize an empty bookmark list
-            toc_bookmarks = []
+            # Add title page bookmark
+            toc.append([1, "Title Page", 0])
             
-            # Add a bookmark for Table of Contents (TOC is usually on page 2 after title page)
-            if final_page_count > 1:
-                toc_bookmarks.append([1, "Table of Contents", 1])  # PyMuPDF uses 0-indexed pages, so page 2 is index 1
+            # Add foreword bookmark if it exists
+            if os.path.exists(FOREWORD_PAGE):
+                toc.append([1, "Foreword", foreword_page_offset])
             
-            # Map the actual locations of cover pages by searching for "Attachment X" text
+            # Find TOC page in the merged document
+            toc_page_idx = title_page_count + foreword_page_count
+            toc.append([1, "Table of Contents", toc_page_idx])
+            
+            # Map actual cover page indices in the merged document
             actual_cover_pages = {}
-            search_pattern = r"Attachment \d+"
             
-            print("Mapping actual cover page locations...")
-            for page_idx in range(final_page_count):
-                page = merged_pdf[page_idx]
+            # Find all cover pages by text pattern
+            for page_num in range(merged_pdf.page_count):
+                page = merged_pdf[page_num]
                 text = page.get_text()
                 
-                # Look for text that matches "Attachment X" pattern and is not in the TOC
-                if "Table of Contents" not in text:
-                    for attachment in attachments:
-                        attachment_num = attachment.get('Attachment Number', '')
-                        if isinstance(attachment_num, float) and attachment_num.is_integer():
-                            attachment_num = int(attachment_num)
-                            
-                        search_text = f"Attachment {attachment_num}"
-                        # If this page contains the attachment header and also has the title
-                        if search_text in text and attachment.get('Title', '') in text:
-                            actual_cover_pages[str(attachment_num)] = page_idx
-                            print(f"Found Attachment {attachment_num} on page {page_idx+1}")
+                for attachment_num in attachment_pages.keys():
+                    if f"Attachment {attachment_num}" in text:
+                        # Make sure this isn't just a mention in another cover page
+                        if "Page" in text and f"Attachment {attachment_num}" in text.split('\n')[:5]:
+                            actual_cover_pages[attachment_num] = page_num
+                            # Add bookmark for the attachment
+                            attachment_data = next((a for a in attachments if str(a.get('Attachment Number', '')) == attachment_num), None)
+                            title = attachment_data.get('Title', 'Untitled') if attachment_data else 'Untitled'
+                            toc.append([1, f"Attachment {attachment_num}: {title}", page_num])
+                            print(f"Added bookmark for Attachment {attachment_num} on page {page_num+1}")
                             break
             
-            # Create bookmarks based on actual page locations
-            for attachment in attachments:
-                attachment_num = attachment.get('Attachment Number', '')
-                if isinstance(attachment_num, float) and attachment_num.is_integer():
-                    attachment_num = int(attachment_num)
-                attachment_num_str = str(attachment_num)
-                
-                title = attachment.get('Title', 'Untitled')
-                
-                # Use actual page location if found, otherwise skip
-                if attachment_num_str in actual_cover_pages:
-                    target_page = actual_cover_pages[attachment_num_str]
-                    toc_bookmarks.append([1, f"Attachment {attachment_num}: {title}", target_page])
-                else:
-                    print(f"Warning: Could not find actual page for Attachment {attachment_num}, skipping bookmark")
+            # Set bookmarks
+            merged_pdf.set_toc(toc)
+            print(f"Created {len(toc)} bookmarks")
             
-            # Set the bookmarks
-            if toc_bookmarks:
-                try:
-                    print(f"Adding {len(toc_bookmarks)} bookmarks to PDF")
-                    merged_pdf.set_toc(toc_bookmarks)
-                except Exception as e:
-                    print(f"Warning: Failed to add bookmarks: {e}")
-            
-            # Save the merged PDF
+            # Save merged PDF
             merged_pdf.save(OUTPUT_PDF)
-            
-            final_page_count = len(merged_pdf)
             merged_pdf.close()
             
-            print(f"\nFinal PDF with title page generated at: {OUTPUT_PDF} ({final_page_count} pages)")
-            print(f"Expected total pages: {estimated_total}, Actual pages: {final_page_count}")
+            print(f"PDF generated at: {OUTPUT_PDF}")
             
-            # Update page map with actual page numbers for link fixing
-            page_map = actual_cover_pages
+            # Clean up
+            title_pdf.close()
+            toc_pdf.close()
             
-            # Verify final PDF structure and fix links
-            final_pdf = fitz.open(OUTPUT_PDF)
-            print("\nDEBUG - Final PDF structure:")
-            
-            # Just print first few pages
-            for i in range(min(10, final_page_count)):
-                page = final_pdf[i]
-                text = page.get_text()
-                first_lines = text.split('\n')[:2]
-                first_line_text = ' '.join(first_lines) if first_lines else "No text"
-                print(f"Page {i+1}: {first_line_text[:70]}")
-            
-            # Fix links if needed - convert named destinations to page links
-            links_fixed = 0
+            # Try to fix links in the final PDF
             try:
-                print("\nDEBUG - Fixing links in PDF:")
-                # First locate all TOC pages
+                print("\nFixing links in final PDF...")
+                final_pdf = fitz.open(OUTPUT_PDF)
+                final_page_count = len(final_pdf)
+                
+                # Find TOC page by content
                 toc_page_idx = -1
-                for i in range(final_page_count):
-                    page = final_pdf[i]
+                for page_idx in range(final_page_count):
+                    page = final_pdf[page_idx]
                     text = page.get_text()
                     if "Table of Contents" in text:
-                        toc_page_idx = i
-                        print(f"Found TOC on page {i+1}")
+                        toc_page_idx = page_idx
+                        print(f"Found TOC on page {page_idx+1}")
                         break
                 
+                # Fix links
+                links_fixed = 0
                 if toc_page_idx >= 0:
                     print(f"Examining links on TOC page {toc_page_idx+1}")
                     toc_page = final_pdf[toc_page_idx]
