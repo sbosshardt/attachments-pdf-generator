@@ -26,9 +26,14 @@ This repo has the following folders/files:
   - `toc-coverpage.pdf` - Generated table of contents and cover pages only
   - `weasyoutput.pdf` - Title page + TOC + cover pages
   - `merged-attachments.pdf` - Complete document with all attachments
+- `src/` - Source code organized in a modular structure
+  - `config/` - Configuration constants and file paths
+  - `excel/` - Excel data reading functionality
+  - `pdf/` - PDF generation and merging operations
+  - `utils/` - Common utility functions
+  - `generate_toc.py` - Entry point for generating table of contents and cover pages
+  - `merge_pdfs.py` - Entry point for merging with attachment PDFs
 - `prompts/` - Prompt files and other management files
-- `generate_toc_coverpage.py` - Script to generate table of contents and cover pages
-- `merge_pdfs.py` - Script to merge the TOC/cover pages with attachment PDFs
 - `generate_and_merge.sh` - Shell script to run both Python scripts in sequence
 
 ## Requirements & Dependencies
@@ -89,22 +94,27 @@ This creates an isolated Python environment in the current directory in the fold
 
 ## How It Works
 
-1. `generate_toc_coverpage.py`:
-   - Reads attachment data from the Excel file
-   - Generates HTML with table of contents (with page numbers) and cover pages
-   - Converts HTML to PDF using WeasyPrint
-   - Adds the title page to create the final weasyoutput.pdf
+The process is organized into modular components for better maintainability:
 
-2. `merge_pdfs.py`:
-   - Reads attachment data from the Excel file
-   - Processes the weasyoutput.pdf page by page
-   - When it encounters a cover page, inserts the corresponding attachment PDF right after it
-   - Fixes internal links to ensure they work in the final PDF
-   - Adds PDF bookmarks/outline for navigation
-   - Creates final merged PDF
+1. Excel Processing:
+   - `src/excel/excel_reader.py` reads attachment data from the Excel file and normalizes values
 
-3. `generate_and_merge.sh`:
-   - Runs both scripts in sequence with error handling
+2. Table of Contents & Cover Pages Generation:
+   - `src/pdf/toc_generator.py` handles the generation of HTML content
+   - Converts the HTML to PDF using WeasyPrint
+   - Adds internal links and processes the title page if present
+
+3. PDF Merging:
+   - `src/pdf/pdf_merger.py` takes the generated TOC/cover page PDF
+   - Scans for cover pages and inserts the corresponding attachment PDFs
+   - Updates page numbers, internal links, and bookmarks
+
+4. Main Entry Points:
+   - `src/generate_toc.py` - Handles the TOC generation process
+   - `src/merge_pdfs.py` - Manages the PDF merging process
+   
+5. Orchestration:
+   - `generate_and_merge.sh` activates the virtual environment and runs both scripts in sequence
 
 ## Author
 Created by Samuel Bosshardt with assistance from Cursor/Claude/ChatGPT.

@@ -8,15 +8,24 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Activate virtual environment
+if [ -d "venv" ]; then
+    echo -e "${BLUE}Activating virtual environment...${NC}"
+    source venv/bin/activate
+else
+    echo -e "${RED}Virtual environment not found. Please create one first with 'python -m venv venv' and install requirements.${NC}"
+    exit 1
+fi
+
 echo -e "${BLUE}[1/2] Generating Table of Contents and Cover Pages PDF${NC}"
-python3 generate_toc_coverpage.py
+python src/generate_toc.py
 if [ $? -ne 0 ]; then
     echo -e "${RED}Error generating Table of Contents PDF. Exiting.${NC}"
     exit 1
 fi
 
 echo -e "${BLUE}[2/2] Merging with attachment PDFs${NC}"
-python3 merge_pdfs.py
+python src/merge_pdfs.py
 if [ $? -ne 0 ]; then
     echo -e "${RED}Error merging PDFs. Exiting.${NC}"
     exit 1
