@@ -53,8 +53,12 @@ def read_attachment_data():
         'Additional Remarks about File': ['Additional Remarks about File', 'Remarks', 'Notes'],
         'Body': ['Body', 'Description', 'Body (Description)'],
         'Filename Reference': ['Filename Reference', 'Filename', 'File'],
-        'Date': ['Date', 'Date (time Pacific)', 'Document Date'],
+        'Date (time Pacific)': ['Date (time Pacific)', 'Date', 'Document Date'],
         'Language': ['Language', 'Lang', 'Language Code'],
+        'Category': ['Category', 'Document Category'],
+        'Document Type': ['Document Type', 'Type'],
+        'Confidentiality': ['Confidentiality', 'Confidential'],
+        'Source URL (when available)': ['Source URL (when available)', 'Source URL', 'URL'],
         'Exclude': ['Exclude', 'Skip']
     }
     
@@ -65,6 +69,11 @@ def read_attachment_data():
             if header and any(possible_match.lower() == header.lower() for possible_match in possible_headers):
                 header_indices[field] = i
                 break
+    
+    # Print detected headers
+    print("Detected headers:")
+    for field, idx in header_indices.items():
+        print(f"  {field} -> column {idx+1}")
     
     # Check if we found all required fields
     required_fields = ['Attachment Number', 'Title']
@@ -87,7 +96,18 @@ def read_attachment_data():
         attachment = {}
         for field, idx in header_indices.items():
             if field != 'Exclude':  # We've already used this field for filtering
-                attachment[field] = row[idx] if idx < len(row) else None
+                value = row[idx] if idx < len(row) else None
+                
+                # Format date if it's a datetime object (remove the 00:00:00 time if it's midnight)
+                if field == 'Date (time Pacific)' and value:
+                    if isinstance(value, datetime):
+                        # Only show the time if it's not midnight
+                        if value.hour == 0 and value.minute == 0 and value.second == 0:
+                            value = value.strftime('%Y-%m-%d')
+                        else:
+                            value = value.strftime('%Y-%m-%d %H:%M:%S')
+                
+                attachment[field] = value
         
         # Set default value for Language if not found
         if 'Language' not in attachment or not attachment['Language']:
@@ -98,23 +118,17 @@ def read_attachment_data():
     print(f"Found {len(data)} attachments")
     return data
 
-def generate_html(data):
+def get_css_styles():
     """
-    Generate HTML content for the PDF.
+    Return the CSS styles for the HTML document.
     
-    Args:
-        data: List of dictionaries containing attachment data
-        
     Returns:
-        String containing HTML content
+        str: CSS styles
     """
-    sorted_data = sorted(data, key=lambda x: x.get('Attachment Number', 0))
-    
-    # CSS styling for the document
-    css = """
+    return """
         @page {
             size: 8.5in 11in;
-            margin: 1in 1in 1in 1in;
+            margin: 0.5in 0.5in 0.5in 0.5in;
         }
         
         @page toc-page {
@@ -200,43 +214,135 @@ def generate_html(data):
             page-break-before: always;
             page-break-after: always;
             text-align: center;
+            position: relative;
+            height: 10in; /* Page height minus margins */
+        }
+        
+        .cover-number {
+            font-size: 14pt;
+            margin-top: 0.25in;
+            margin-bottom: 0.1in;
         }
         
         .cover-title {
             font-size: 16pt;
             font-weight: bold;
-            margin-top: 3in;
-            margin-bottom: 0.25in;
-        }
-        
-        .cover-number {
-            font-size: 14pt;
             margin-bottom: 0.25in;
         }
         
         .cover-info {
+            position: absolute;
+            bottom: 0.5in;
+            width: 100%;
+            text-align: center;
             font-size: 12pt;
-            margin-bottom: 0.15in;
+        }
+        
+        .cover-metadata {
+            width: 90%;
+            margin: 0.2in auto;
+            text-align: left;
+            border-collapse: collapse;
+        }
+        
+        .cover-metadata th {
+            text-align: right;
+            vertical-align: top;
+            padding: 0.1in 0.2in 0.1in 0;
+            font-weight: bold;
+            width: 20%;
+            white-space: nowrap;
+        }
+        
+        .cover-metadata td {
+            text-align: left;
+            vertical-align: top;
+            padding: 0.1in 0 0.1in 0;
+        }
+        
+        .cover-description-header {
+            width: 90%;
+            margin: 0.3in auto 0.1in auto;
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        .cover-description {
+            width: 90%;
+            margin: 0 auto 0.3in auto;
+            text-align: left;
+            font-style: italic;
+            line-height: 1.6;
+        }
+        
+        .cover-remarks {
+            width: 90%;
+            margin: 0.3in auto;
+            text-align: left;
+            font-size: 11pt;
+            border-top: 1px solid #999;
+            padding-top: 0.2in;
         }
     """
-    
-    # Start building the HTML document
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Table of Contents and Cover Pages</title>
-    <style>{css}</style>
-</head>
-<body>
+
+def normalize_attachment_number(num):
     """
+    Normalize attachment number to integer if possible.
     
-    # Add Table of Contents
-    html += """
-    <div class="toc-container">
-        <h1>Table of Contents</h1>
-        <table class="toc-table">
+    Args:
+        num: The attachment number
+    
+    Returns:
+        The normalized attachment number
     """
+    if isinstance(num, float) and num.is_integer():
+        return int(num)
+    return num
+
+def normalize_page_count(count):
+    """
+    Normalize page count to integer if possible.
+    
+    Args:
+        count: The page count
+    
+    Returns:
+        int: The normalized page count
+    """
+    if isinstance(count, float) and count.is_integer():
+        return int(count)
+    elif not isinstance(count, int):
+        try:
+            return int(float(count))
+        except (ValueError, TypeError):
+            return 1
+    return count
+
+def determine_foreword_page_count():
+    """
+    Determine the number of pages in the foreword document.
+    
+    Returns:
+        int: Number of pages in the foreword
+    """
+    if os.path.exists(FOREWORD_PAGE):
+        foreword_pdf = fitz.open(FOREWORD_PAGE)
+        count = len(foreword_pdf)
+        foreword_pdf.close()
+        return count
+    return 0
+
+def calculate_page_map(attachments):
+    """
+    Calculate page numbers for each attachment.
+    
+    Args:
+        attachments: List of dictionaries containing attachment data
+    
+    Returns:
+        dict: Mapping of attachment numbers to page numbers
+    """
+    sorted_data = sorted(attachments, key=lambda x: x.get('Attachment Number', 0))
     
     # Start page is calculated based on Title page + TOC pages + first cover
     toc_entries = len(sorted_data)
@@ -248,16 +354,44 @@ def generate_html(data):
     current_page = start_page
     page_map = {}
     
-    # Add a TOC entry for each attachment
     for attachment in sorted_data:
-        attachment_num = attachment.get('Attachment Number', '')
-        if isinstance(attachment_num, float) and attachment_num.is_integer():
-            attachment_num = int(attachment_num)
-        
-        title = attachment.get('Title', 'Untitled')
+        attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
         
         # Store the page number for this attachment
         page_map[str(attachment_num)] = current_page
+        
+        # Get the number of content pages for this attachment
+        page_count = normalize_page_count(attachment.get('Page count', 1))
+        
+        # Move to the next cover page
+        current_page += page_count + 1  # Add content pages plus next cover
+    
+    return page_map
+
+def generate_toc_html(sorted_data, page_map):
+    """
+    Generate HTML for the table of contents.
+    
+    Args:
+        sorted_data: Sorted list of attachment data
+        page_map: Mapping of attachment numbers to page numbers
+    
+    Returns:
+        str: HTML for the table of contents
+    """
+    html = """
+    <div class="toc-container">
+        <h1>Table of Contents</h1>
+        <table class="toc-table">
+    """
+    
+    # Add a TOC entry for each attachment
+    for attachment in sorted_data:
+        attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+        title = attachment.get('Title', 'Untitled')
+        
+        # Get the page number for this attachment
+        page_number = page_map.get(str(attachment_num), 0)
         
         # Add the TOC entry with table structure
         html += f"""
@@ -266,22 +400,9 @@ def generate_html(data):
                 <a class="toc-link" href="#cover-{attachment_num}">Attachment {attachment_num}</a>
             </td>
             <td class="attachment-title">{title}</td>
-            <td class="page-num">{current_page}</td>
+            <td class="page-num">{page_number}</td>
         </tr>
         """
-        
-        # Get the number of content pages for this attachment
-        page_count = attachment.get('Page count', 1)
-        if isinstance(page_count, float) and page_count.is_integer():
-            page_count = int(page_count)
-        elif not isinstance(page_count, int):
-            try:
-                page_count = int(float(page_count))
-            except (ValueError, TypeError):
-                page_count = 1
-        
-        # Move to the next cover page
-        current_page += page_count + 1  # Add content pages plus next cover
     
     # Close the TOC section
     html += """
@@ -289,24 +410,156 @@ def generate_html(data):
     </div>
     """
     
-    # Add cover pages for each attachment
-    for attachment in sorted_data:
-        attachment_num = attachment.get('Attachment Number', '')
-        if isinstance(attachment_num, float) and attachment_num.is_integer():
-            attachment_num = int(attachment_num)
-        
-        title = attachment.get('Title', 'Untitled')
-        
-        # Calculate the page number for display on the cover page
-        page_number = page_map.get(str(attachment_num), 0)
-        
-        html += f"""
+    return html
+
+def generate_cover_page_html(attachment, page_number):
+    """
+    Generate HTML for a single cover page.
+    
+    Args:
+        attachment: Dictionary containing attachment data
+        page_number: The page number to display on the cover page
+    
+    Returns:
+        str: HTML for the cover page
+    """
+    attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+    title = attachment.get('Title', 'Untitled')
+    
+    # Extract additional fields (if available)
+    date = attachment.get('Date (time Pacific)', '')
+    category = attachment.get('Category', '')
+    document_type = attachment.get('Document Type', '')
+    page_count = attachment.get('Page count', '')
+    confidentiality = attachment.get('Confidentiality', '')
+    body = attachment.get('Body', '')
+    remarks = attachment.get('Additional Remarks about File', '')
+    source_url = attachment.get('Source URL (when available)', '')
+    
+    html = f"""
     <div class="cover-page" id="cover-{attachment_num}">
-        <div class="cover-title">{title}</div>
         <div class="cover-number">Attachment {attachment_num}</div>
-        <div class="cover-info">Page {page_number}</div>
+        <div class="cover-title">{title}</div>
+        
+        <table class="cover-metadata">
+    """
+    
+    # Only add fields that have values
+    if date:
+        html += f"""
+        <tr>
+            <th>Date (time Pacific):</th>
+            <td>{date}</td>
+        </tr>
+        """
+        
+    if category:
+        html += f"""
+        <tr>
+            <th>Category:</th>
+            <td>{category}</td>
+        </tr>
+        """
+        
+    if document_type:
+        html += f"""
+        <tr>
+            <th>Document Type:</th>
+            <td>{document_type}</td>
+        </tr>
+        """
+        
+    if page_count:
+        html += f"""
+        <tr>
+            <th>Page Count:</th>
+            <td>{page_count}</td>
+        </tr>
+        """
+        
+    if confidentiality:
+        html += f"""
+        <tr>
+            <th>Confidentiality:</th>
+            <td>{confidentiality}</td>
+        </tr>
+        """
+        
+    if source_url:
+        html += f"""
+        <tr>
+            <th>Source:</th>
+            <td>{source_url}</td>
+        </tr>
+        """
+        
+    html += """
+        </table>
+    """
+    
+    # Add body/description if available
+    if body:
+        html += f"""
+        <div class="cover-description-header">Description:</div>
+        <div class="cover-description">
+            {body}
+        </div>
+        """
+        
+    # Add remarks if available
+    if remarks:
+        html += f"""
+        <div class="cover-remarks">
+            <strong>Additional Remarks:</strong><br>
+            {remarks}
+        </div>
+        """
+    
+    # Add page number at the bottom
+    html += f"""
+        <div class="cover-info">
+            Page {page_number}
+        </div>
     </div>
     """
+    
+    return html
+
+def generate_html(data):
+    """
+    Generate HTML content for the PDF.
+    
+    Args:
+        data: List of dictionaries containing attachment data
+        
+    Returns:
+        String containing HTML content
+    """
+    # Sort the data by attachment number
+    sorted_data = sorted(data, key=lambda x: x.get('Attachment Number', 0))
+    
+    # Calculate page numbers for each attachment
+    page_map = calculate_page_map(sorted_data)
+    
+    # Start building the HTML document
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Table of Contents and Cover Pages</title>
+    <style>{get_css_styles()}</style>
+</head>
+<body>
+    """
+    
+    # Add Table of Contents
+    html += generate_toc_html(sorted_data, page_map)
+    
+    # Add cover pages for each attachment
+    for attachment in sorted_data:
+        attachment_num = normalize_attachment_number(attachment.get('Attachment Number', ''))
+        page_number = page_map.get(str(attachment_num), 0)
+        html += generate_cover_page_html(attachment, page_number)
     
     # Close the HTML document
     html += """
@@ -320,18 +573,6 @@ def generate_html(data):
     print("Saved HTML to output-files/toc-debug.html for debugging")
     
     return html
-
-def determine_foreword_page_count():
-    """
-    Determine the number of pages in the foreword.
-    """
-    if os.path.exists(FOREWORD_PAGE):
-        foreword_pdf = fitz.open(FOREWORD_PAGE)
-        foreword_pages = len(foreword_pdf)
-        foreword_pdf.close()
-        return foreword_pages
-    else:
-        return 0
 
 def main():
     """
