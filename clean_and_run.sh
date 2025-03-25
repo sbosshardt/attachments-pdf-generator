@@ -32,6 +32,13 @@ fi
 echo -e "${BLUE}Activating virtual environment...${NC}"
 source ./venv/bin/activate
 
+# Check if title page generator script exists and run it
+if [ -f "input-files/generate_title_page.sh" ]; then
+    echo -e "${BLUE}Generating title page with current date and time...${NC}"
+    bash input-files/generate_title_page.sh
+    echo "Title page updated successfully"
+fi
+
 # Run the main script
 echo -e "${BLUE}Starting PDF generation...${NC}"
 
