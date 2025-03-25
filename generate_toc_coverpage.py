@@ -10,6 +10,7 @@ import os
 import openpyxl
 from weasyprint import HTML
 from datetime import datetime
+from src.pdf.pdf_merger import locate_toc_page
 import fitz  # PyMuPDF
 
 # File paths
@@ -808,110 +809,6 @@ def main():
             # Clean up
             title_pdf.close()
             toc_pdf.close()
-            
-            # Try to fix links in the final PDF
-            try:
-                print("\nFixing links in final PDF...")
-                final_pdf = fitz.open(OUTPUT_PDF)
-                final_page_count = len(final_pdf)
-                
-                # Find TOC page by content
-                toc_page_idx = -1
-                for page_idx in range(final_page_count):
-                    page = final_pdf[page_idx]
-                    text = page.get_text()
-                    if "Table of Contents" in text:
-                        toc_page_idx = page_idx
-                        print(f"Found TOC on page {page_idx+1}")
-                        break
-                
-                # Fix links
-                links_fixed = 0
-                if toc_page_idx >= 0:
-                    print(f"Examining links on TOC page {toc_page_idx+1}")
-                    toc_page = final_pdf[toc_page_idx]
-                    toc_links = toc_page.get_links()
-                    print(f"Found {len(toc_links)} links on TOC page")
-                    
-                    for link in toc_links:
-                        if 'uri' in link and link['uri'].startswith('#cover-'):
-                            attachment_id = link['uri'][7:]  # Remove '#cover-'
-                            print(f"Found TOC link to Attachment {attachment_id}")
-                            # If we have a page number for this attachment in our map
-                            if attachment_id in actual_cover_pages:
-                                target_page = actual_cover_pages[attachment_id]
-                                print(f"  Fixing link to point to page {target_page+1}")
-                                # Validate the target page is within the document
-                                if target_page >= 0 and target_page < final_page_count:
-                                    # Create a new goto link
-                                    new_link = {
-                                        'kind': fitz.LINK_GOTO,
-                                        'from': link['from'],  # rectangle
-                                        'page': target_page,   # target page
-                                        'to': fitz.Point(0, 0),  # top of page
-                                        'zoom': 0  # default zoom
-                                    }
-                                    # Remove old link and add new one
-                                    toc_page.delete_link(link)
-                                    toc_page.insert_link(new_link)
-                                    links_fixed += 1
-                                else:
-                                    print(f"  Warning: Target page {target_page} is out of range (0-{final_page_count-1})")
-                            else:
-                                print(f"  Warning: No mapping found for Attachment {attachment_id}")
-                
-                # Now scan all pages for any remaining links
-                for page_num in range(final_page_count):
-                    if page_num == toc_page_idx:
-                        continue  # Skip TOC page as we've already processed it
-                        
-                    page = final_pdf[page_num]
-                    links = page.get_links()
-                    
-                    for link in links:
-                        # If this is a named destination link (uri starts with #)
-                        if 'uri' in link and link['uri'].startswith('#cover-'):
-                            attachment_id = link['uri'][7:]  # Remove '#cover-'
-                            print(f"Found link to Attachment {attachment_id} on page {page_num+1}")
-                            
-                            # If we have a page number for this attachment
-                            if attachment_id in actual_cover_pages:
-                                # Get the page number from our mapped locations
-                                target_page = actual_cover_pages[attachment_id]
-                                print(f"  Fixing link to point to page {target_page+1}")
-                                
-                                # Validate the target page is within the document
-                                if target_page >= 0 and target_page < final_page_count:
-                                    # Create a new page link
-                                    new_link = {
-                                        'kind': fitz.LINK_GOTO,
-                                        'from': link['from'],
-                                        'page': target_page,
-                                        'to': fitz.Point(0, 0),
-                                        'zoom': 0
-                                    }
-                                    # Remove old link and add new one
-                                    page.delete_link(link)
-                                    page.insert_link(new_link)
-                                    links_fixed += 1
-                                else:
-                                    print(f"  Warning: Target page {target_page} is out of range (0-{final_page_count-1})")
-                            else:
-                                print(f"  Warning: No mapping found for Attachment {attachment_id}")
-                
-                if links_fixed > 0:
-                    print(f"Fixed {links_fixed} links in the document")
-                    # Save again if links were fixed
-                    final_pdf.save(OUTPUT_PDF)
-                else:
-                    print("No links needed fixing")
-            except Exception as e:
-                print(f"Warning: Error fixing links: {e}")
-                print("Proceeding with original links")
-                import traceback
-                traceback.print_exc()
-            
-            final_pdf.close()
             
         else:
             # If no title page, just use the TOC PDF as the output

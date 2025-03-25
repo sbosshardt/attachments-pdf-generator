@@ -34,6 +34,7 @@ def locate_toc_page(pdf_doc):
     Returns:
         tuple: (list of TOC page indices, dict of TOC links)
     """
+    first_toc_page = -1
     toc_page_indices = []
     toc_links = {}
     
@@ -43,12 +44,15 @@ def locate_toc_page(pdf_doc):
         text = page.get_text()
         
         # First page with "Table of Contents" is the main TOC page
-        if "Table of Contents" in text:
+        if "Table of Contents" in text and "Attachment " in text:
+            first_toc_page = page_num
             toc_page_indices.append(page_num)
             print(f"Found main TOC page at page {page_num+1}")
             
             # Extract all links from this TOC page
             links = page.get_links()
+            print(f"Found {len(links)} links on TOC page {page_num+1}")
+            print(f"Links: {links}")
             for link in links:
                 if 'uri' in link and link['uri'].startswith('#cover-'):
                     attachment_id = link['uri'][7:]  # Remove '#cover-'
@@ -56,12 +60,12 @@ def locate_toc_page(pdf_doc):
                     print(f"Found TOC link to Attachment {attachment_id}")
         
         # The next page after the TOC main page is continuation (if it has attachment entries)
-        elif page_num == 2 and page_num not in toc_page_indices and "Attachment " in text:
+        elif first_toc_page > -1 and page_num not in toc_page_indices and "Attachment " in text:
             # Find two adjacent numbers (like "14 50") which indicates this is TOC formatting
             import re
             if re.search(r'Attachment\s+\d+\s+\d+\s*$', text, re.MULTILINE):
                 toc_page_indices.append(page_num)
-                print(f"Found TOC continuation page at page {page_num+1}")
+                print(f"Found possible TOC continuation page at page {page_num+1}")
                 
                 # Extract all links from this TOC page
                 links = page.get_links()
@@ -70,22 +74,10 @@ def locate_toc_page(pdf_doc):
                         attachment_id = link['uri'][7:]  # Remove '#cover-'
                         toc_links[attachment_id] = link
                         print(f"Found TOC link to Attachment {attachment_id}")
-    
-    # If TOC seems to be 3 or more pages, print a warning
-    if len(toc_page_indices) > 2:
-        print(f"WARNING: Found more than 2 TOC pages: {len(toc_page_indices)}. This is unexpected.")
-        # Limit to first 2 pages
-        toc_page_indices = toc_page_indices[:2]
+            else:
+                break
     
     print(f"Found {len(toc_page_indices)} TOC pages with {len(toc_links)} total links")
-    
-    # Return the first page for backward compatibility with existing code
-    # but also return the full list for improved processing
-    if toc_page_indices:
-        first_toc_page = toc_page_indices[0]
-    else:
-        first_toc_page = -1
-        
     return first_toc_page, toc_links, toc_page_indices
 
 def locate_cover_pages(pdf_doc, attachment_map):
@@ -306,13 +298,10 @@ def merge_pdfs(toc_pdf_path, attachments, output_file=MERGED_PDF):
             foreword_page_index = i
             foreword_found = True
             print(f"Found foreword on page {i+1}")
-        
-        # Check for TOC page
-        if "Table of Contents" in page_text and "Attachment" in page_text:
-            if main_toc_page_index is None:
-                main_toc_page_index = i
-                toc_page_indices.append(i)
-                print(f"Found main TOC page at page {i+1}")
+
+    # Get the main TOC page index and the TOC page indices
+    main_toc_page_index, toc_links, tp_indices = locate_toc_page(toc_pdf)
+    toc_page_indices = toc_page_indices + tp_indices
 
     # Now look for all attachment cover pages
     for i in range(toc_pdf.page_count):
@@ -347,12 +336,6 @@ def merge_pdfs(toc_pdf_path, attachments, output_file=MERGED_PDF):
                         'merged_page': i,  # Initial value, will be updated as we insert pages
                         'title': attachment_title
                     })
-    
-    # Get the links from the TOC page
-    links = []
-    if main_toc_page_index is not None:
-        links = toc_pdf[main_toc_page_index].get_links()
-        print(f"Found {len(links)} TOC pages with {len(links)} total links")
     
     # Report cover pages found
     print(f"Found {len(cover_page_info)} cover pages")
@@ -424,13 +407,8 @@ def merge_pdfs(toc_pdf_path, attachments, output_file=MERGED_PDF):
                     foreword_exists=(foreword_page_index is not None))
     
     # Fix links in the merged PDF - look for all TOC pages
-    toc_pages_merged = []
-    for i in range(merged_pdf.page_count):
-        page_text = merged_pdf[i].get_text()
-        if "Table of Contents" in page_text:
-            toc_pages_merged.append(i)
-            print(f"Found TOC on page {i+1}")
-            
+    first_toc_page, toc_links, toc_pages_merged = locate_toc_page(merged_pdf)
+
     # Fix links on all TOC pages
     for toc_page in toc_pages_merged:
         page = merged_pdf[toc_page]
